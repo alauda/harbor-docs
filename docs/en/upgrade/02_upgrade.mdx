@@ -1,0 +1,53 @@
+---
+title: Upgrading Harbor
+weight: 20
+---
+
+Upgrading Harbor is a relatively straightforward process, but the complexity can increase based on:
+
+- The installation method you have used.
+- How old your Harbor version is.
+- If you're upgrading to a major version.
+- If possible, you should test out the upgrade in a test environment before updating your production instance.Your test environment should mimic your production environment as closely as possible.
+
+You can read the [official upgrade documentation](https://goharbor.io/docs/2.12.0/administration/upgrade/) for more information.
+
+## Upgrade Path
+
+The table below contains the complete upgrade path. When upgrading, you need to upgrade the Operator and Harbor instance versions in sequence.
+
+| No  | Alauda Build of Harbor Operator Version |
+| --- | ---------------- |
+| 1   | 2.12.z           |
+
+:::info
+In the version numbers above, the `.z` indicates the latest available patch version for that minor release.
+When performing an upgrade, you should always use the most recent patch version to ensure you benefit from the latest security updates and bug fixes.
+The latest patch versions for each release can be found in the [Release Notes](../overview/release_notes.mdx).
+:::
+
+:::warning
+If your Harbor version is lower than `2.12.0`, please refer to the [Harbor Data Migration](./01_upgrade_2.6.4_to_2.12.md) to complete the upgrade.
+:::
+
+## Upgrade Steps
+
+:::warning
+To safely upgrade your Harbor version to a new version, please note the following:
+
+1. Before upgrading the Harbor instance, please complete the data backup of the instance.
+2. Upgrading Harbor takes some time, depending on the Harbor data size and the version gap between the current version and target version (number of upgrades)
+3. The instance will be unavailable during the upgrade process.
+:::
+
+When upgrading, you need to upgrade the <ExternalSiteLink name="acp" href="extend/operator.html#upgrading-operators" children="Operator" /> version and instance version in sequence according to the upgrade path. Upgrading the Operator will not automatically upgrade the instance version, and the upgraded Operator will not manage old Harbor instances, so you need to manually trigger the instance upgrade in time.
+
+## Upgrading Instances
+
+### Upgrading Instances via UI
+
+Go to the `Administrator` -> `Marketplace` -> `Operator Hub` page, switch to the target cluster and enter the `Alauda Build of Harbor` Operator details page, click on the instance name you want to upgrade to enter the instance details page, and click the upgrade button on the instance details page.
+
+### Upgrading Instances via YAML
+
+Go to the `Administrator` -> `Clusters` -> `Resources` page, switch to the target cluster and search for the `Harbor` resource type, edit the instance resource you want to upgrade, modify the `spec.version` field to the desired instance version, and save it.

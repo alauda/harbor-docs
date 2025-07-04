@@ -1,0 +1,77 @@
+---
+weight: 10
+---
+
+# Introduction
+
+## Harbor Introduction
+
+Harbor is an open source registry that secures artifacts with policies and role-based access control, ensures images are scanned and free from vulnerabilities, and signs images as trusted. As a Cloud Native Computing Foundation (CNCF) Graduated project, Harbor v2.12.3 delivers compliance, performance, and interoperability to help you consistently store, sign, and scan container images across cloud native environments.
+
+Originally developed by VMware, Harbor has evolved into a comprehensive solution for enterprises seeking to manage container images securely in cloud-native environments. Harbor provides a centralized platform for storing, managing, and distributing Docker, Helm, OCI, and other container artifacts, making it an essential component in modern containerized application development and deployment pipelines.
+
+## Harbor Advantages
+
+The core advantages of Harbor v2.12 are as follows:
+
+- Enhanced Security
+
+  Harbor provides vulnerability scanning, image signing, and verification to ensure only trusted content is deployed. The v2.12 release includes improved robot account functionality with additional configuration options for better integration and security management in CI/CD processes.
+
+- Comprehensive Access Control
+
+  Fine-grained role-based access control (RBAC) with project-level permissions and integration with enterprise identity providers like LDAP, Active Directory, and OIDC ensures proper governance of container artifacts.
+
+- Advanced Registry Management
+
+  Harbor supports registry replication between instances, proxy caching of public registries, and content trust with Notary, providing a complete solution for enterprise container management.
+
+- Cloud Native Integration
+
+  As a CNCF Graduated project, Harbor is designed to integrate seamlessly with Kubernetes and other cloud native tools, supporting OCI artifacts beyond just container images.
+
+- Performance and Scalability
+
+  Harbor v2.12 introduces speed limits for proxy cache projects, allowing organizations to control network bandwidth when pulling artifacts and optimize resource usage.
+
+## Scenarios
+
+The main application scenarios of Harbor are as follows:
+
+- Private Registry for Enterprise
+
+  Organizations can deploy Harbor as a private registry to store proprietary container images on-premises, enforcing corporate security policies without exposing sensitive content to external services.
+
+- Proxy Registry for Public Images
+
+  Harbor can serve as a proxy cache for public registries like Docker Hub, reducing bandwidth usage and avoiding rate limits by pulling images once and caching them locally for multiple internal consumers.
+
+- Air-Gapped Environments
+
+  For high-security environments without internet access, Harbor provides a mechanism for manually updating vulnerability databases and managing both public and internal container images securely.
+
+- Multi-Cloud Container Management
+
+  Harbor's registry replication capabilities enable consistent container image management across multiple cloud environments, supporting hybrid and multi-cloud deployment strategies.
+
+- DevSecOps Pipeline Integration
+
+  With its scanning, signing, and access control features, Harbor integrates into CI/CD pipelines to enforce security policies throughout the development lifecycle.
+
+## Limitations
+
+- Resource Requirements
+
+  Harbor requires significant resources for full functionality, especially when enabling features like vulnerability scanning and high availability.
+
+- Storage Migration
+
+  While Harbor supports multiple storage backends, migrating between them can be complex and requires careful planning.
+
+- Performance at Scale
+
+  For extremely large deployments with millions of artifacts, performance tuning may be required to maintain optimal operation.
+
+- External Dependencies
+
+  Some advanced features like vulnerability scanning require external components that need to be maintained separately.

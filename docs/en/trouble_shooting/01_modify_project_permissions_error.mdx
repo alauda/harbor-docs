@@ -1,0 +1,86 @@
+# Modify Harbor Project Permissions Prompt Internal Server Error
+
+## Problem Description
+
+When modifying the permissions of a Harbor project, an `internal server error` is prompted.
+
+## Root Cause
+
+The Redis used by Harbor does not support the `keys` command
+
+## Troubleshooting
+
+Check the logs of the Harbor Core Deployment, confirm if the following error message is present:
+
+```
+2024-12-11T06:36:11Z [ERROR] [/lib/http/error.go:56]: {"errors":[{"code":"UNKNOWN","message":"unknown: NOPERM this user has no permissions to run the 'keys' command or its subcommand"}]}
+2024-12-11T06:36:11Z [ERROR] [/lib/http/error.go:56]: {"errors":[{"code":"UNKNOWN","message":"unknown: NOPERM this user has no permissions to run the 'keys' command or its subcommand"}]}
+2024-12-11T06:36:16Z [ERROR] [/lib/http/error.go:56]: {"errors":[{"code":"UNKNOWN","message":"unknown: NOPERM this user has no permissions to run the 'keys' command or its subcommand"}]}
+2024-12-11T06:36:17Z [ERROR] [/lib/http/error.go:56]: {"errors":[{"code":"UNKNOWN","message":"unknown: NOPERM this user has no permissions to run the 'keys' command or its subcommand"}]}
+```
+
+## Solution
+
+**Using Alauda Cache Service for Redis OSS**
+
+In the namespace of the redis deployment, modify the `redisuser` configuration named `default`, remove the `-keys` configuration.
+
+``` bash
+[root@demo1-gm1 ~]# kubectl get redisuser
+NAME                                   INSTANCE                  USERNAME   PHASE     AGE
+rfr-acl-harbor-harbor-demo1-redis-default    harbor-harbor-demo1-redis   default    Success   44d
+rfr-acl-harbor-harbor-demo1-redis-operator   harbor-harbor-demo1-redis   operator   Success   44d
+```
+
+``` bash
+[root@demo1-gm1 ~]# kubectl edit redisuser default -n <namespace>
+
+```
+
+- before changed
+
+``` yaml
+# ...
+spec:
+  accountType: default
+  aclRules: +@all -acl -flushall -flushdb -keys -* // remove the "-keys" configuration.
+  arch: sentinel
+  passwordSecrets:
+  - harbor-demo1-redis-password
+  redisName: harbor-harbor-demo1-redis
+  username: default
+status:
+  phase: Success
+  lastUpdateSuccess: "2024-12-11T08:40:17Z"
+```
+
+
+- after changed
+
+``` yaml
+# ...
+spec:
+  accountType: default
+  aclRules: +@all -acl -flushall -flushdb -* // this line has changed
+  arch: sentinel
+  passwordSecrets:
+  - harbor-demo1-redis-password
+  redisName: harbor-harbor-demo1-redis
+  username: default
+status:
+  phase: Success
+  lastUpdateSuccess: "2024-12-11T08:40:17Z"
+```
+
+**Using Redis Self-Managed**
+
+Redis instance Self-Managed please use the [Redis ACL](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/) to check and modify command permission control.
+
+## Notes
+
+Due to the `keys` command scanning all indexes and causing the Redis service to block, consider whether to keep it enabled long-term.
+
+## Related Content
+
+- https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/
+

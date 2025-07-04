@@ -1,0 +1,457 @@
+---
+title: "How to Customize Deployment Templates"
+description: "The custom tool deployment template provides a scenario-based tool deployment template, reducing the user's cognitive cost and helping the user to quickly deploy the tool."
+weight: 130
+---
+
+## Custom Process
+
+The custom template process is as follows:
+
+1. Configure the template: According to the explanation in the [Configure Template](#config_template) section, configure the content of the template as needed
+2. Register and verify the template: According to the explanation in the [Register and Verify the Template](#register_template) section, register the template in the target cluster and verify the template content
+
+## <span id ="config_template">Configure Template</span>
+
+### Template Structure
+
+The tool deployment template is defined and managed through the ConfigMap resource. Each template consists of the following three main parts:
+
+1. Basic information: Contains basic configuration information such as the name, description, and tags of the template
+2. UI dynamic form: Defines the form items that the user needs to fill in when deploying the tool
+3. Deployment template: Contains the specific resource definitions required for tool deployment
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+## Part 1: Basic Information
+metadata:
+  labels:
+    tools.cpaas.io/template: harbor
+  name: harbor-template-quickstart
+  namespace: cpaas-system
+  annotations:
+    ui.cpaas.io/displayName.en: Quick Start Template
+    ui.cpaas.io/description.en: This template is used to quickly create a lightweight Harbor instance, suitable for development and testing scenarios, not recommended for production environments.
+## Part 2: UI Dynamic Form
+    ui.cpaas.io/descriptors: >-
+      - path: httpPort
+        x-descriptors:
+          - urn:alm:descriptor:label:zh:HTTP 端口
+          - urn:alm:descriptor:label:en:HTTP Port
+          - 'urn:alm:descriptor:description:zh:Harbor 服务访问端口'
+          - 'urn:alm:descriptor:description:en:Harbor server port'
+          - urn:alm:descriptor:placeholder:zh:输入范围 30000 ~ 32767
+          - urn:alm:descriptor:placeholder:en:Input range between 30000 and 32767.
+          - urn:alm:descriptor:com.tectonic.ui:validation:required
+          - urn:alm:descriptor:com.tectonic.ui:number
+          - urn:alm:descriptor:com.tectonic.ui:validation:minimum:30000
+          - urn:alm:descriptor:com.tectonic.ui:validation:maximum:32767
+        ...
+## Part 3: Deployment Template
+data:
+  template: >-
+    externalURL: http://{{ $displayIP }}:{{ .Values.httpPort }}
+    helmValues:
+      existingSecretAdminPassword: {{ .Values.adminPasswordSecret }}
+      existingSecretAdminPasswordKey: password
+
+      externalURL: http://{{ $displayIP }}:{{ .Values.httpPort }}
+          ...
+```
+
+### Basic Information
+
+Basic information includes the template name, description, tags, comments, display name, and description.
+
+| Field                                                        | Description                                                                 |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `metadata.name`                                              | The unique identifier of the template resource, used to distinguish different templates in the system |
+| `metadata.namespace`                                         | The namespace where the template resource is located, currently the UI **only displays templates under the `cpaas-system` namespace** |
+| `metadata.labels[tools.cpaas.io/template]`                   | Specifies the type of tool applicable to the template, for example, `harbor` indicates that this template is used to deploy Harbor. This value usually corresponds to the resource name of the tool instance |
+| `metadata.labels[ui.cpaas.io/hidden]`                        | Controls whether the template is displayed in the UI. Note that if you need to hide the product's built-in template, you need to use the `skip-sync` annotation in conjunction with it |
+| `metadata.annotations[ui.cpaas.io/description.<language>]`   | A detailed description of the template, helping the user to understand the purpose and application scenarios of the template. `<language>` is the language code, supporting [internationalization configuration](#internationalization) |
+| `metadata.annotations[ui.cpaas.io/configuration.<language>]` | Technical specifications of the template, including key information such as resource requirements, storage configuration, and network access methods. `<language>` is the language code, supporting [internationalization configuration](#internationalization) |
+| `metadata.annotations[skip-sync]`                            | Controls whether the operator manages the built-in template. If the template is set with this annotation, the operator will not update the content of the template when restarting or upgrading |
+
+Example:
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: harbor-template-quickstart
+  namespace: cpaas-system
+  labels:
+    tools.cpaas.io/template: harbor
+  annotations:
+    ui.cpaas.io/displayName.en: Quick Start Template
+    ui.cpaas.io/configuration.en: >-
+      Configuration: <br/>
+      Compute resources: 2 CPU cores, 4 Gi memory <br/>
+      Storage: Use node local storage, configure the storage node IP and path <br/>
+      Network access: Use NodePort to access the service, share the node IP with storage, and specify the port <br/>
+      Dependencies: Configure existing Redis and PostgreSQL access credentials <br/>
+      Other settings: Configure account credentials, SSO feature is disabled by default
+    ui.cpaas.io/description.en: This template is used to quickly create a lightweight Harbor instance, suitable for development and testing scenarios, not recommended for production environments.
+```
+
+### UI Dynamic Form
+
+The tool deployment UI provides dynamic form functionality, which can automatically generate the corresponding form interface according to the form description information in the template, simplifying the user's configuration process.
+
+![template form](/template-dynamic-form.drawio.png)
+
+The configuration information of the dynamic form is stored in the `ui.cpaas.io/descriptors` annotation, the specific format is as follows:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  annotations:
+    ui.cpaas.io/descriptors: >-
+      - path: storageClass
+        x-descriptors:
+          - urn:alm:descriptor:label:zh:Gitaly 存储类
+          - urn:alm:descriptor:label:en:Gitaly Storage Class
+          - 'urn:alm:descriptor:description:zh:选择存储类，用于存放代码仓库'
+          - 'urn:alm:descriptor:description:en:Select a storage class for storing repositories'
+          - urn:alm:descriptor:com.tectonic.ui:validation:required
+          - urn:alm:descriptor:com.tectonic.ui:select:expression
+          - urn:alm:descriptor:expression:props.options:api:/kubernetes/${context.cluster}/apis/storage.k8s.io/v1/storageclasses
+          - urn:alm:descriptor:expression:props.options:label:path:metadata.name
+          - urn:alm:descriptor:expression:props.options:value:path:metadata.name
+      - path: storageSize
+        x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:text
+          - urn:alm:descriptor:com.tectonic.ui:validation:required
+          - urn:alm:descriptor:label:en:Gitaly Storage Size
+          - urn:alm:descriptor:label:zh:Gitaly 容量
+          - urn:alm:descriptor:description:en:To declare the persistent storage capacity, a unit is required, such as 10Gi.
+          - urn:alm:descriptor:description:zh:声明持久化存储容量，需要带单位，如 10Gi。
+```
+
+| Field            | Description                                                                 |
+| --------------- | --------------------------------------------------------------------------- |
+| `path`          | The unique identifier of the form field, used to reference the user's input value in the deployment template |
+| `x-descriptors` | Defines the properties of the form control, including label name, description text, control type, data validation rules, etc. |
+
+Please refer to the [Configure Dynamic Form](#dynamic_form) section for the supported control types of the dynamic form.
+
+### Deployment Template
+
+The template engine is implemented based on `Helm Template` and supports all Helm built-in [template functions](https://helm.sh/docs/chart_template_guide/function_list/), such as string processing, mathematical operations, flow control, etc. You can use these functions to build flexible deployment templates.
+
+The main function of the template is to replace the input parameters into the predefined template. The input parameters mainly come from two sources:
+
+1. The value entered by the user in the form
+2. Configuration information obtained from Kubernetes resources.
+
+![template input](/template-input.drawio.png)
+
+**Get parameters from user input**
+
+In the template, you can use the `{{ .Values.<field name> }}` syntax to get the value entered by the user. For example, if a field named `domain` is defined in the form for entering the deployment domain, then in the template, you can use `{{ .Values.domain }}` to reference this value.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-template
+  ...
+  annotations:
+    ui.cpaas.io/descriptors: >-
+      - path: domain
+        x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:text
+          - urn:alm:descriptor:com.tectonic.ui:validation:required
+          - urn:alm:descriptor:label:en:Domain Name
+          - urn:alm:descriptor:label:zh:域名
+          - 'urn:alm:descriptor:description:en:'
+          - 'urn:alm:descriptor:description:zh:'
+spec:
+  template: |
+    ...
+    externalURL: http://{{ .Values.domain }}
+    helmValues:
+      existingSecretAdminPassword: {{ .Values.adminPasswordSecret }}
+      existingSecretAdminPasswordKey: password
+
+      externalURL: http://{{ .Values.domain }}
+
+      expose:
+        type: ingress
+        tls:
+          enabled: false
+        ingress:
+          hosts:
+            core: {{ .Values.domain }}
+```
+
+**Get parameters from k8s resources**
+
+In the template, you can use the `lookup` function provided by Helm Template to get configuration information from Kubernetes resources. For example, to get the Redis connection information (such as Host, Port) from the `harbor-redis` Secret resource in the `tools` namespace, you can use the `lookup` function as follows:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-template
+  ...
+spec:
+  template: |
+    ...
+    global:
+      {{- $secret := (lookup "v1" "Secret" "tools" "harbor-redis") }}
+      redis:
+        host: {{ $secret.data.host | b64dec | trim }}
+        port: {{ $secret.data.port | b64dec | trim }}
+```
+
+The name of the Secret can also be entered by the user. For example, if a field named `redisSecret` is defined, you can use `.Values.redisSecret` to reference the Secret name entered by the user in the template.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-template
+  ...
+  annotations:
+    ui.cpaas.io/descriptors: >-
+      - path: redisSecret
+        x-descriptors:
+          - urn:alm:descriptor:label:zh:Redis 凭据
+          - urn:alm:descriptor:label:en:Redis Secret
+          - urn:alm:descriptor:com.tectonic.ui:validation:required
+spec:
+  template: |
+    ...
+    {{- $secret := (lookup "v1" "Secret" .Values.namespace .Values.redisSecret) }}
+    redis:
+      external:
+        {{- if and (hasKey $secret.data "masterName") $secret.data.masterName }}
+        addr: "{{ $secret.data.address | b64dec | trim }}"
+        sentinelMasterSet: {{ default "mymaster" $secret.data.masterName | b64dec | trim }}
+        {{- else }}
+        addr: {{ $secret.data.host | b64dec | trim }}:{{ $secret.data.port | b64dec | trim }}
+        {{- end }}
+        existingSecret: {{ .Values.redisSecret }}
+        existingSecretKey: password
+      type: external
+```
+
+### <span id ="internationalization">Configure Internationalization</span>
+
+The template supports internationalization configuration. When displayed on the UI, the corresponding name and description will be displayed according to the language selected by the user.
+
+The supported internationalization configuration annotations include:
+
+- `ui.cpaas.io/displayName.<language>`
+- `ui.cpaas.io/description.<language>`
+- `ui.cpaas.io/configuration.<language>`
+
+To configure internationalization, just add the language code at the end of the field, such as:
+
+- `zh`: Display when Chinese is selected
+- `en`: Display when English is selected
+
+Example:
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  annotations:
+    ui.cpaas.io/displayName.zh: 快速开始模板
+    ui.cpaas.io/displayName.en: Quick Start Template
+```
+
+
+### <span id ="dynamic_form">Configure Dynamic Form</span>
+
+#### Control Types
+
+Common control types include: string, number, and drop-down box.
+
+| Control Type                                               | Description             |
+| ---------------------------------------------------------- | ------------------------ |
+| `urn:alm:descriptor:com.tectonic.ui:text`                  | String type input box   |
+| `urn:alm:descriptor:com.tectonic.ui:number`                | Number type input box   |
+| `urn:alm:descriptor:com.tectonic.ui:select:expression`     | Drop-down box           |
+
+Example:
+
+```yaml
+- path: name
+  x-descriptors:
+    - urn:alm:descriptor:com.tectonic.ui:text
+- path: age
+  x-descriptors:
+    - urn:alm:descriptor:com.tectonic.ui:number
+- path: gender
+  x-descriptors:
+    - urn:alm:descriptor:com.tectonic.ui:select:expression
+```
+
+#### Dynamic Form Variables
+
+The following variables can be used when describing the dynamic form:
+
+1. `${context.cluster}` : The name of the current cluster
+2. `${context.namespace}` : The current namespace (the namespace where the user selects the tool to be deployed)
+
+Example:
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:com.tectonic.ui:select:expression
+  - urn:alm:descriptor:expression:props.options:api:/kubernetes/${context.cluster}/api/v1/namespaces/${context.namespace}/secrets?fieldSelector=type!=kubernetes.io/tls
+  ...
+```
+
+#### Control Internationalization
+
+The tool deployment template supports configuring the international display content of the control's name, description, and placeholder. By adding descriptors with language codes in the x-descriptors, the system can dynamically display the corresponding text according to the user's language preference.
+
+The supported internationalization configuration types include:
+
+- Control Name (label): `urn:alm:descriptor:label:<language>:<name>`
+- Control Description (description): `urn:alm:descriptor:description:<language>:<description>`
+- Control Placeholder (placeholder): `urn:alm:descriptor:placeholder:<language>:<placeholder>`
+
+Where `<language>` is the language code, currently supported:
+- `zh`: Chinese
+- `en`: English
+
+Example: Configure a domain input box that supports Chinese and English:
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:label:zh:Domain
+  - urn:alm:descriptor:label:en:Domain
+```
+
+#### Control Display Information
+
+Dynamic form controls support configuring international display content. When displayed on the UI, the corresponding name and description will be displayed according to the user's language selection.
+
+| Control Field                                                  | Description                                                                 |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `urn:alm:descriptor:label:<language>:<name>`                   | Describes the name of the control<br /> - `<language>` is the language code, such as `zh` for Chinese, `en` for English<br />- `<name>` is the name displayed by the control              |
+| `urn:alm:descriptor:description:<language>:<description>`      | Describes the description of the control<br /> - `<language>` is the language code, such as `zh` for Chinese, `en` for English<br />- `<description>` is the description of the control             |
+| `urn:alm:descriptor:placeholder:<language>:<placeholder>`      | Describes the placeholder description of the control<br /> - `<language>` is the language code, such as `zh` for Chinese, `en` for English<br />- `<placeholder>` is the placeholder description of the control |
+
+![ui-description](/template-ui-description.png)
+
+#### Field Validation
+
+The dynamic form supports validating user input. The supported validation rules are as follows:
+
+| Control Field                                                           | Description                             |
+| ---------------------------------------------------------------------- | ---------------------------------------- |
+| `urn:alm:descriptor:com.tectonic.ui:validation:minimum:<number>`       | Limit the minimum value of the number type field |
+| `urn:alm:descriptor:com.tectonic.ui:validation:maximum:<number>`       | Limit the maximum value of the number type field |
+| `urn:alm:descriptor:com.tectonic.ui:validation:required`               | Limit the field to be a required item |
+| `urn:alm:descriptor:com.tectonic.ui:validation:pattern:<pattern>`      | Limit the input to meet the given regular expression |
+| `urn:alm:descriptor:com.tectonic.ui:validation:maxLength:<number>`     | Limit the maximum length of the input string |
+| `urn:alm:descriptor:com.tectonic.ui:validation:minLength:<number>`     | Limit the minimum length of the input string |
+
+Example 1: Limit the value range to: 30000 ~ 32767
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:com.tectonic.ui:number
+  - urn:alm:descriptor:com.tectonic.ui:validation:minimum:30000
+  - urn:alm:descriptor:com.tectonic.ui:validation:maximum:32767
+```
+
+Example 2: Limit the string field to be required
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:com.tectonic.ui:text
+  - urn:alm:descriptor:com.tectonic.ui:validation:required
+```
+
+Example 3: Limit the path entered by the user to be an absolute path
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:label:zh:Node Path
+  - urn:alm:descriptor:com.tectonic.ui:text
+  - urn:alm:descriptor:com.tectonic.ui:validation:pattern:^\/([\w+-]+\/)*([\w+-]+)$
+```
+
+Example 4: Limit the length of the user input to 2-32 characters
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:com.tectonic.ui:text
+  - urn:alm:descriptor:com.tectonic.ui:validation:minLength:2
+  - urn:alm:descriptor:com.tectonic.ui:validation:maxLength:32
+```
+
+#### Dynamic Selection
+
+The dynamic form supports dynamically loading the option list by calling the API.
+
+| Control Field                                                               | Description             |
+| -------------------------------------------------------------------------- | ------------------------ |
+| `urn:alm:descriptor:com.tectonic.ui:select:expression`                      | Describes the control as a drop-down box |
+| `urn:alm:descriptor:expression:props.options:api:<api>`                     | Defines the api address to get the option data |
+| `urn:alm:descriptor:expression:props.options:label:path:metadata.name`     | Defines the field of the option display name |
+| `urn:alm:descriptor:expression:props.options:value:path:metadata.name`     | Defines the value field of the option |
+
+Example: Get the Secret resource from the devops namespace of the test cluster and use `metadata.name` as the display name and value of the option.
+
+```yaml
+x-descriptors:
+  - urn:alm:descriptor:com.tectonic.ui:select:expression
+  - urn:alm:descriptor:expression:props.options:api:/kubernetes/test/api/v1/namespaces/devops/secrets?fieldSelector=type!=kubernetes.io/tls
+  - urn:alm:descriptor:expression:props.options:label:path:metadata.name
+  - urn:alm:descriptor:expression:props.options:value:path:metadata.name
+```
+
+## <span id ="register_template">Register and Verify the Template</span>
+
+- Register the custom template:
+   - Create the template resource (`ConfigMap`) in the `cpaas-system` namespace of the target cluster to complete the registration.
+
+- Verify the template registration:
+   - Enter the tool operator details page
+   - Click the `Create Resource` button to enter the template selection page
+   - If you can see the newly added template, the registration is successful
+
+- Verify the template content:
+   - Access the tool Operator details page
+   - Click the `Create Resource` button to enter the template selection page
+   - If the newly added template is visible, it indicates successful registration
+
+- Verify template content:
+   - Select the custom template
+   - Follow the interface prompts to create a tool instance
+   - If the tool instance can be successfully deployed, it indicates that the template content is correct
+
+## Frequently Asked Questions
+
+### How to access the built-in template content?
+
+After the tool operator is deployed, it will automatically register the built-in deployment templates in the `cpaas-system` namespace of the current cluster. You can view the template content through the following path:
+
+1. Enter the platform `Management View`
+2. Select `Cluster Management` > `Resource Management`
+3. Select the resource type as `ConfigMap`
+4. Search for the keyword `template` to find the corresponding template
+
+### How to hide the product's built-in template?
+
+If you need to hide the product's built-in template, you can add the `ui.cpaas.io/hidden` label to the template resource and set it to `true`. Additionally, you need to add the `skip-sync` annotation; otherwise, the operator will restore the template content when restarting or upgrading.
+
+```yaml
+metadata:
+  labels:
+    ui.cpaas.io/hidden: "true"
+  annotations:
+    skip-sync: "true"
+```
+
