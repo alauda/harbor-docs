@@ -1,0 +1,553 @@
+---
+weight: 60
+---
+
+# HARBOR Backup and Restore Using Velero
+
+This guide demonstrates how to use [Velero](https://velero.io/), an open-source cloud-native disaster recovery tool, to perform backup and restore operations for HARBOR.
+
+## Applicability
+
+This solution is applicable to HARBOR instances running **version 2.12 or later**.
+
+:::danger
+
+This solution does not support HARBOR instances deployed using HostPath storage.
+
+:::
+
+## Terminology
+
+| Term              | Description                                                                 |
+|-------------------|-----------------------------------------------------------------------------|
+| Source Instance   | The HARBOR instance before backup                                           |
+| Target Instance   | The HARBOR instance after restore                                           |
+| Source Namespace  | The namespace where the source instance is located                          |
+| Target Namespace  | The namespace where the target instance is located                          |
+| HARBOR CR Resource| The custom resource describing the deployment configuration of HARBOR, used by the Operator to deploy HARBOR instances |
+
+## Prerequisites
+
+1. **Deploy MinIO Object Storage**: This backup and restore solution relies on object storage to save backup data, so a MinIO instance must be deployed in advance. ACP provides <ExternalSiteLink name="acp" href="/storage/storagesystem_minio/installation.html" children="Quickly create a MinIO instance" />.
+2. **Deploy Velero**: Velero is a backup and restore tool. ACP provides `Alauda Container Platform Data Backup for Velero`, which can be deployed in the `Administrator` view, under `Marketplace` -> `Cluster Plugins` by searching for `Velero`.
+3. **Install mc Command-Line Tool**: mc is MinIO's command-line management tool. For installation instructions, see the [MinIO official documentation](https://min.io/docs/minio/linux/reference/minio-mc.html#install-mc).
+4. **Install kubectl Command-Line Tool**: kubectl is Kubernetes' command-line management tool. For installation instructions, see the [Kubernetes official documentation](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/).
+
+For convenience in subsequent operations, please set the following environment variables first:
+
+```bash
+export MINIO_HOST=<MinIO instance access address> # Example: http://192.168.1.100:32008
+export MINIO_ACCESS_KEY=<MinIO instance access key> # Example: minioadmin
+export MINIO_SECRET_KEY=<MinIO instance secret key> # Example: minioadminpassword
+export MINIO_ALIAS_NAME=<MinIO instance alias name> # Example: myminio
+
+export VELERO_BACKUP_BUCKET=<Velero backup bucket name> # Example: backup
+export VELERO_BACKUP_REPO_NAME=<Velero backup repo name> # Example: harbor-backup-repo
+
+export HARBOR_NAMESPACE=<namespace of the HARBOR instance to be backed up>
+export HARBOR_NAME=<name of the HARBOR instance to be backed up>
+```
+
+Run the following commands to configure the mc tool and test the connection:
+
+```bash
+mc alias set ${MINIO_ALIAS_NAME} ${MINIO_HOST} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}
+mc ping ${MINIO_ALIAS_NAME}
+
+# Example output:
+#   1: http://192.168.131.56:32571:32571   min=98.86ms    max=98.86ms    average=98.86ms    errors=0   roundtrip=98.86ms 
+#   2: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=64.21ms    errors=0   roundtrip=29.57ms 
+#   3: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=52.77ms    errors=0   roundtrip=29.88ms 
+```
+
+If you can successfully ping the MinIO instance, it means mc is configured correctly.
+
+## Backup
+
+### Preparation
+
+Backup preparation consists of two steps:
+
+1. Create Bucket
+2. Configure Velero backup repository
+
+#### Create Bucket
+
+Run the following command to create a bucket for storing backup data:
+
+```bash
+mc mb ${MINIO_ALIAS_NAME}/${VELERO_BACKUP_BUCKET}
+
+# Output:
+# Bucket created successfully `myminio/backup`.
+```
+
+#### Configure Velero Backup Repository
+
+Run the following command to create the Velero backup repository:
+
+```bash
+harbor_backup_repo_credentials_secret_name="harbor-backup-repo-credentials"
+minio_harbor_backup_bucket="${VELERO_BACKUP_BUCKET:-backup}"
+minio_harbor_backup_bucket_directory="harbor"
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+stringData:
+  cloud: |
+    [default]
+    aws_access_key_id = ${MINIO_ACCESS_KEY}
+    aws_secret_access_key = ${MINIO_SECRET_KEY}
+kind: Secret
+metadata:
+  labels:
+    component: velero
+    cpaas.io/backup-storage-location-repo: ${VELERO_BACKUP_REPO_NAME}
+  name: ${harbor_backup_repo_credentials_secret_name}
+  namespace: cpaas-system
+type: Opaque
+---
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: ${VELERO_BACKUP_REPO_NAME}
+  namespace: cpaas-system
+spec:
+  config:
+    checksumAlgorithm: ""
+    insecureSkipTLSVerify: "true"
+    region: minio
+    s3ForcePathStyle: "true"
+    s3Url: ${MINIO_HOST}
+  credential:
+    key: cloud
+    name: ${harbor_backup_repo_credentials_secret_name}
+  objectStorage:
+    bucket: ${minio_harbor_backup_bucket}
+    prefix: ${minio_harbor_backup_bucket_directory}
+  provider: aws
+EOF
+
+# Output
+# secret/harbor-backup-repo-credentials created
+# backupstoragelocationrepo.ait.velero.io/harbor-backup-repo created
+```
+
+### Backup Execution
+
+Manual backup consists of four steps:
+
+1. Set the harbor instance to read-only mode
+2. Create backup pod
+3. Execute backup
+4. After successful backup, disable harbor read-only mode
+
+#### Set the harbor instance to read-only mode
+
+Log in to Harbor, go to Administration -> Configuration -> System Settings -> Repository Read Only and set it to read-only mode.
+
+After modification, Harbor will display a message at the top: "Harbor is set to read-only mode, Deleting repository, artifact, tag and pushing image will be deactivated under read-only mode."
+
+
+#### Create Backup Pod
+
+This step creates a Pod that mounts the HARBOR PVCs, allowing Velero to complete PVC data backup.
+
+```bash
+image=''
+
+if [ -z "${IMAGE}" ]; then
+  image=$(kubectl get deployment -n ${HARBOR_NAMESPACE} -l release=${HARBOR_NAME} -o jsonpath='{range .items[0].spec.template.spec.containers[]}{.image}{"\n"}{end}' | head -n1)
+fi
+
+PVC_NAMES=($(kubectl get pvc -n ${HARBOR_NAMESPACE} -l release=${HARBOR_NAME} -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'))
+
+VOLUME_MOUNTS=""
+VOLUMES=""
+INDEX=0
+for pvc in ${PVC_NAMES[@]}; do
+  VOLUME_MOUNTS="${VOLUME_MOUNTS}
+        - name: data-${INDEX}
+          mountPath: /mnt/data-${INDEX}"
+  VOLUMES="${VOLUMES}
+    - name: data-${INDEX}
+      persistentVolumeClaim:
+        claimName: ${pvc}"
+  INDEX=$((INDEX+1))
+done
+
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${HARBOR_NAME}-backup-pod
+  namespace: ${HARBOR_NAMESPACE}
+  labels:
+    release: ${HARBOR_NAME}
+spec:
+  containers:
+    - name: backup
+      image: ${image}
+      command: ["/bin/sh", "-c", "sleep 86400"]
+      resources:
+        limits:
+          cpu: 1
+          memory: 1Gi
+      volumeMounts:${VOLUME_MOUNTS}
+  volumes:${VOLUMES}
+  restartPolicy: Never
+EOF
+
+kubectl wait --for=condition=ready pod -n ${HARBOR_NAMESPACE} ${HARBOR_NAME}-backup-pod
+
+# Output
+# pod/xxxx-harbor-backup-pod created
+# pod/xxxx-harbor-backup-pod condition met
+```
+
+#### Execute Backup
+
+Run the following commands to create a backup schedule and trigger a backup job:
+
+```bash
+export BACKUP_POLICY_NAME=${BACKUP_POLICY_NAME:-harbor-backup}
+export VELERO_BACKUP_REPO_NAME=${VELERO_BACKUP_REPO_NAME:-backup}
+
+kubectl apply -f - <<EOF
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: ${BACKUP_POLICY_NAME}
+  namespace: cpaas-system
+spec:
+  schedule: '@every 876000h'
+  template:
+    defaultVolumesToFsBackup: true
+    hooks: {}
+    includedNamespaces:
+    - ${HARBOR_NAMESPACE}
+    includedResources:
+    - '*'
+    storageLocation: ${VELERO_BACKUP_REPO_NAME}
+    ttl: 720h0m0s
+EOF
+
+kubectl create -f - <<EOF
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  labels:
+    velero.io/schedule-name: ${BACKUP_POLICY_NAME}
+    velero.io/storage-location: ${VELERO_BACKUP_REPO_NAME}
+  generateName: ${BACKUP_POLICY_NAME}-
+  namespace: cpaas-system
+spec:
+  csiSnapshotTimeout: 10m0s
+  defaultVolumesToFsBackup: true
+  includedNamespaces:
+    - ${HARBOR_NAMESPACE}
+  includedResources:
+    - "*"
+  itemOperationTimeout: 4h0m0s
+  snapshotMoveData: false
+  storageLocation: ${VELERO_BACKUP_REPO_NAME}
+  ttl: 720h0m0s
+EOF
+
+# Output
+# schedule.velero.io/harbor-backup created
+# backup.velero.io/harbor-backup-r6hht created
+```
+
+View backup logs:
+
+```bash
+kubectl logs -f -n cpaas-system -l app.kubernetes.io/instance=velero --max-log-requests 100 | grep harbor-backup
+
+# Output
+# time="2025-07-01T07:29:54Z" level=info msg="PodVolumeBackup completed" controller=PodVolumeBackup logSource="pkg/controller/pod_volume_backup_controller.go:244" pvb=harbor-backup-xxx-q7prc
+```
+
+Check task progress. If the status is Completed, the backup was successful.
+
+```bash
+kubectl get backup -n cpaas-system -o jsonpath="{range .items[*]}{.metadata.name}{'\t'}{.status.phase}{'\t'}{.status.startTimestamp}{'\n'}{end}" | grep ${BACKUP_POLICY_NAME}
+
+# Output
+# Completed
+```
+
+#### After Successful Backup, Disable Harbor Read-Only Mode
+
+Log in to Harbor and uncheck Administration -> Configuration -> System Settings -> Repository Read Only
+
+
+## Restore
+
+### Preparation
+
+Restore preparation consists of four steps:
+
+1. Select the backup to restore
+2. Determine the target namespace for restoration
+3. Uninstall HARBOR CE Operator
+
+#### Select the Backup to Restore
+
+Run the following command to view all successful backup records and select the desired backup based on the start time.
+
+```bash
+kubectl get backup -n cpaas-system -o jsonpath="{range .items[*]}{.metadata.name}{'\t'}{.status.phase}{'\t'}{.status.startTimestamp}{'\n'}{end}" | grep ${BACKUP_POLICY_NAME} | grep Completed
+
+# Output:
+# harbor-backup-xxx     Completed       2025-07-01T07:29:19Z
+```
+
+Set the BACKUP_NAME environment variable:
+
+```bash
+export BACKUP_NAME=<selected backup record name>
+```
+
+#### Determine Target Namespace
+
+It is recommended to restore to a new namespace. Set the following environment variables:
+
+```bash
+export NEW_HARBOR_NAMESPACE=<new namespace name>
+kubectl create namespace ${NEW_HARBOR_NAMESPACE}
+```
+
+#### Uninstall HARBOR CE Operator
+
+Run the following command to uninstall the HARBOR CE Operator:
+
+```bash
+kubectl get subscription --all-namespaces | grep harbor-ce-operator | awk '{print "kubectl delete subscription "$2" -n "$1}' | sh
+
+# Output:
+# subscription.operators.coreos.com "harbor-ce-operator" deleted
+```
+
+::: details Why uninstall the HARBOR Operator?
+
+During restoration, Velero needs to start backup pods to restore PVC data, which takes a long time. If the Operator is not uninstalled, the following issues may occur:
+
+1. The Operator may recreate workloads based on the HARBOR CR, causing the restored pods to be restarted or recreated, ultimately leading to restoration interruption or failure.
+2. Some restored resources may conflict with existing resources, such as Ingress.
+
+:::
+
+::: details Impact of Uninstalling HARBOR CE Operator
+
+After uninstalling the Operator, modifications to the HARBOR CR will not take effect, such as adjusting resources or storage size.
+
+Uninstalling the Operator will not cause existing instances to malfunction.
+
+:::
+
+### Restore Operations
+
+Restore operations consist of five steps:
+
+1. Create restore configuration file
+2. Create restore task
+3. Clean up resources
+4. Modify HARBOR CR resource
+5. Deploy HARBOR CE Operator
+
+#### Create Restore Configuration File
+
+Please read the YAML comments carefully and modify as needed (such as changing the storage class) before creating.
+
+```bash
+# If you need to change the storage class, set the following environment variables
+OLD_STORAGECLASS_NAME='' # Original storage class name
+NEW_STORAGECLASS_NAME='' # New storage class name
+
+if [ -n "${OLD_STORAGECLASS_NAME}" ] && [ -n "${NEW_STORAGECLASS_NAME}" ] && [ ${NEW_STORAGECLASS_NAME} != ${OLD_STORAGECLASS_NAME} ]; then
+kubectl apply -f - <<EOF
+apiVersion: v1
+data:
+  resourcemodifier: |
+    version: v1
+    resourceModifierRules:
+      - conditions:
+          groupResource: persistentvolumeclaims
+          resourceNameRegex: .*
+          namespaces:
+            - "*"
+        patches: &a1
+          - operation: test
+            path: /spec/storageClassName
+            value: ${OLD_STORAGECLASS_NAME}
+          - operation: replace
+            path: /spec/storageClassName
+            value: ${NEW_STORAGECLASS_NAME}
+      - conditions:
+          groupResource: persistentvolume
+          resourceNameRegex: .*
+          namespaces:
+            - "*"
+        patches: *a1
+      - conditions:
+          groupResource: persistentvolumeclaims
+          resourceNameRegex: .*
+          namespaces:
+            - "*"
+        patches:
+          - operation: test
+            path: "/metadata/annotations/meta.helm.sh~1release-namespace"
+            value: ${HARBOR_NAMESPACE}
+          - operation: replace
+            path: "/metadata/annotations/meta.helm.sh~1release-namespace"
+            value: ${NEW_HARBOR_NAMESPACE}
+kind: ConfigMap
+metadata:
+  labels:
+    component: velero
+  name: harbor-restore-modifier
+  namespace: cpaas-system
+EOF
+
+else
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+data:
+  resourcemodifier: |
+    version: v1
+    resourceModifierRules:
+      - conditions:
+          groupResource: persistentvolumeclaims
+          resourceNameRegex: .*
+          namespaces:
+            - "*"
+        patches:
+          - operation: test
+            path: "/metadata/annotations/meta.helm.sh~1release-namespace"
+            value: ${HARBOR_NAMESPACE}
+          - operation: replace
+            path: "/metadata/annotations/meta.helm.sh~1release-namespace"
+            value: ${NEW_HARBOR_NAMESPACE}
+kind: ConfigMap
+metadata:
+  labels:
+    component: velero
+  name: harbor-restore-modifier
+  namespace: cpaas-system
+EOF
+fi
+```
+
+#### Create Restore Task
+
+Run the following command to create the restore task:
+
+```bash
+kubectl create -f - <<EOF
+apiVersion: velero.io/v1
+kind: Restore
+metadata:
+  generateName: ${HARBOR_NAME}-restore-
+  namespace: cpaas-system
+spec:
+  backupName: ${BACKUP_NAME}
+  hooks: {}
+  includedNamespaces:
+    - ${HARBOR_NAMESPACE}
+  includedResources:
+    - persistentvolumeclaims
+    - persistentvolumes
+    - secrets
+    - pods
+    - harbors.operator.alaudadevops.io
+  itemOperationTimeout: 10h0m0s
+  namespaceMapping:
+    ${HARBOR_NAMESPACE}: ${NEW_HARBOR_NAMESPACE}
+  resourceModifier:
+    kind: configmap
+    name: harbor-restore-modifier
+EOF
+```
+
+View restore logs:
+
+```bash
+kubectl logs -f -n cpaas-system -l app.kubernetes.io/instance=velero --max-log-requests 100 | grep harbor-restore
+
+# Output
+# time="2025-07-01T08:01:41Z" level=info msg="Async fs restore data path completed" PVR=xxxx-HARBOR-restore-mv6l5-sc4pk controller=PodVolumeRestore logSource="pkg/controller/pod_volume_restore_controller.go:275" pvr=xxxx-HARBOR-restore-mv6l5-sc4pk
+# time="2025-07-01T08:01:41Z" level=info msg="Restore completed" controller=PodVolumeRestore logSource="pkg/controller/pod_volume_restore_controller.go:327" pvr=xxxx-HARBOR-restore-mv6l5-sc4pk
+```
+
+Check task progress. If the status is `Completed`, the restore was successful.
+
+```bash
+kubectl get restore -n cpaas-system -o jsonpath="{range .items[*]}{.metadata.name}{'\t'}{.status.phase}{'\t'}{.status.startTimestamp}{'\n'}{end}" | grep ${HARBOR_NAME}-restore
+
+# Output
+# xxx-harbor-restore-xxx    InProgress      2025-07-01T10:18:17Z
+```
+
+#### Clean Up Resources
+
+Make sure the restore operation is complete before proceeding!
+
+Run the following commands to clean up resources:
+
+```bash
+kubectl delete configmap,secrets,sa -n ${NEW_HARBOR_NAMESPACE} -l release=${HARBOR_NAME}
+
+kubectl get pod -n ${NEW_HARBOR_NAMESPACE} | grep ${HARBOR_NAME} | awk '{print $1}' | xargs kubectl delete pod -n ${NEW_HARBOR_NAMESPACE}
+
+kubectl get secret -n ${NEW_HARBOR_NAMESPACE} | grep sh.helm.release.v1.${HARBOR_NAME} | awk '{print $1}' | xargs kubectl delete secret -n ${NEW_HARBOR_NAMESPACE}
+```
+
+#### Modify HARBOR CR Resource
+
+```bash
+kubectl edit harbor ${HARBOR_NAME} -n ${NEW_HARBOR_NAMESPACE}
+```
+
+The new instance CR resource may need the following modifications. Please adjust according to your actual situation:
+
+1. **Domain Name**:
+   - **Applicable scenario**: The original instance was deployed using a domain name
+   - **Reason**: The same domain name in the Ingress resources of the old and new instances will cause conflicts, resulting in the failure to create the Ingress for the new instance
+   - **Recommendation**:
+     - (Recommended) Change the original instance's domain to a temporary domain, keep the new instance unchanged
+     - Or keep the original instance unchanged, and change the new instance to a new domain
+   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.md#network_access)
+2. **NodePort**:
+   - **Applicable scenario**: The original instance was deployed using NodePort
+   - **Reason**: The same NodePort in the Service resources of the old and new instances will cause conflicts, resulting in the failure to create the Service for the new instance
+   - **Recommendation**:
+     - (Recommended) Change the original instance's NodePort to a temporary port, keep the new instance unchanged
+     - Or keep the original instance unchanged, and change the new instance to a new port
+   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.md#network_access)
+3. **Storage Class**:
+   - **Applicable scenario**: The storage class of the old and new instances is different (e.g., the original used NFS, the new uses Ceph)
+   - **Reason**: If not modified, the Operator will still use the old storage class to create PVCs, which will conflict with the restored PVCs
+   - **Recommendation**: Change to the correct storage class
+   - **How to modify**: See [Configure Instance Storage](../install/03_harbor_deploy.md#storage)
+4. **PostgreSQL Connection Information**:
+   - **Applicable scenario**: The new and old instances use different PostgreSQL instances or databases
+   - **Reason**: If not modified, the new instance will still connect to the old database
+   - **Recommendation**: Change to the correct connection information
+   - **How to modify**: See [Configure PostgreSQL Credentials](../install/03_harbor_deploy.md#configure-postgresql-credentials)
+
+#### Deploy HARBOR CE Operator
+
+Go to the `Administrator` view, `Marketplace -> OperatorHub` page, and redeploy the `Alauda Build of HARBOR` Operator.
+
+After the Operator is deployed, it will deploy the new instance according to the HARBOR CR. You can view the progress on the instance details page.
+
+After the instance status returns to normal, log in to HARBOR to check whether the data has been restored successfully. Check items include but are not limited to:
+
+- Groups
+- Repositories
+- Images
+
+At the same time, disable the read-only mode for the restored Harbor instance (log in to Harbor and uncheck Administration -> Configuration -> System Settings -> Repository Read Only).
+
