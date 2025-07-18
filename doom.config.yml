@@ -24,6 +24,8 @@ releaseNotes:
     fixed: |
       project = <%= project %> AND fixVersion in ("harbor-ce-operator-<%= version %>") AND type = Bug AND status in (Done, Resolved) AND ReleaseNotesStatus = Publish
 
+editRepoBaseUrl: alauda/harbor-docs
+
 translate:
   # 系统提示语，ejs 模板，传入的参数有 `sourceLang`, `targetLang`, `additionalPrompts`
   # 其中 `sourceLang` 和 `targetLang` 是 `中文` 和 `英文` 两个字符串，
