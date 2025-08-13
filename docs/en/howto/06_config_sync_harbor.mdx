@@ -112,6 +112,43 @@ If the pod starts successfully, the synchronization is working correctly.
 
 This configuration establishes automatic image synchronization from Harbor to cluster registries, maintaining consistent image paths and enabling seamless deployment workflows across your infrastructure. The push-based replication ensures that images are available in target registries immediately after being pushed to Harbor.
 
+## FAQ
+
+### Can the Replication Function Be Used for Harbor Disaster Recovery?
+
+Harbor's Replication function can only provide a preliminary disaster recovery (DR) solution and comes with certain limitations.
+
+- Firstly, a failover mechanism is required to automatically switch the domain name resolution from the primary instance to the secondary instance in the event of a primary instance failure, allowing users to continue pulling already synchronized images.
+- Secondly, this function relies on event-driven synchronization of images and is primarily designed for replication between registries, not as a mature solution tailored for disaster recovery.
+
+The following sections analyze the problems this solution can address and those it cannot.
+
+#### Problems Addressed
+
+- **Automatic Synchronization of Image Data**: Container images and Helm charts from the primary instance can be automatically synchronized to the secondary instance. When the "synchronize deletions" option is enabled, images deleted from the primary instance are automatically removed from the secondary instance.
+- **Automatic Failover**: In the event of a primary instance failure, the external domain name resolution can automatically switch to the secondary instance, enabling users to pull already synchronized images (Recovery Time Objective, or RTO, depends primarily on the implemented failover mechanism).
+
+#### Problems Not Addressed
+
+1. **Automatic Synchronization of Non-Image Data (Critical!)**:
+
+- **Issue Description**: Harbor's Replication function does not synchronize metadata such as user accounts, permission configurations (e.g., OIDC settings), project member groups, or audit logs.
+- **Impact**: Users whose metadata is not synchronized will be unable to access Harbor after failover, significantly undermining the disaster recovery objectives.
+
+2. **Recovery Point Objective (RPO)**:
+
+- **Issue Description**: The Replication function is not designed specifically for disaster recovery. Image replication depends on background task execution, which cannot guarantee that all images in the primary registry are synchronized to the secondary registry at the time of a failure.
+- **Impact**: During a primary registry failure, users will be unable to pull images that have not yet been synchronized.
+
+3. **Fallback to the Primary Instance**:
+
+- **Issue Description**: The current solution only supports automatic failover to the secondary instance. Fallback to the primary instance requires manual intervention.
+- **Impact**: Before fallback, incremental data from the secondary instance must be synchronized back to the primary instance, or this data will be lost.
+
+#### Recommendations for a Comprehensive DR Solution
+
+To achieve a robust disaster recovery mechanism, focus on synchronization at the PostgreSQL database (PG) and storage layers. For instance, implement real-time database replication for PostgreSQL and enable storage-layer synchronization (e.g., S3 cross-region replication) to ensure comprehensive consistency of both metadata and all data.
+
 ## References
 
 - [Harbor Replication](https://goharbor.io/docs/2.12.0/administration/configuring-replication/)
