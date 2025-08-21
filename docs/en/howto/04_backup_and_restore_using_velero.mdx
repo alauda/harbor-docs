@@ -55,9 +55,9 @@ mc alias set ${MINIO_ALIAS_NAME} ${MINIO_HOST} ${MINIO_ACCESS_KEY} ${MINIO_SECRE
 mc ping ${MINIO_ALIAS_NAME}
 
 # Example output:
-#   1: http://192.168.131.56:32571:32571   min=98.86ms    max=98.86ms    average=98.86ms    errors=0   roundtrip=98.86ms 
-#   2: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=64.21ms    errors=0   roundtrip=29.57ms 
-#   3: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=52.77ms    errors=0   roundtrip=29.88ms 
+#   1: http://192.168.131.56:32571:32571   min=98.86ms    max=98.86ms    average=98.86ms    errors=0   roundtrip=98.86ms
+#   2: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=64.21ms    errors=0   roundtrip=29.57ms
+#   3: http://192.168.131.56:32571:32571   min=29.57ms    max=98.86ms    average=52.77ms    errors=0   roundtrip=29.88ms
 ```
 
 If you can successfully ping the MinIO instance, it means mc is configured correctly.
@@ -205,6 +205,104 @@ kubectl wait --for=condition=ready pod -n ${HARBOR_NAMESPACE} ${HARBOR_NAME}-bac
 # pod/xxxx-harbor-backup-pod condition met
 ```
 
+#### Create Backup Volume Policy
+
+Volume policy is used to specify the backup method for PVCs. The default policy is to backup PVCs using the `fs-backup` method.
+
+```bash
+export BACKUP_POLICY_NAME=${BACKUP_POLICY_NAME:-harbor-backup}
+export VELERO_BACKUP_REPO_NAME=${VELERO_BACKUP_REPO_NAME:-backup}
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${BACKUP_POLICY_NAME}-volume-policy
+  namespace: cpaas-system
+data:
+  resourcepolicies: |
+    version: v1
+    volumePolicies:
+      - conditions:
+          csi: {}
+        action:
+          type: fs-backup
+      - conditions:
+          csi: {}
+        action:
+          type: fs-backup
+EOF
+
+# Output
+# configmap/harbor-backup-volume-policy created
+```
+
+If the PVC supports snapshot, you can use snapshot to backup pvc to speed up backup. You need to modify the volume policy configmap to specify that the storage class uses snapshot for backup. For example, if the `ceph` storage class supports snapshot backup, you need to add the following configuration (the added condition should be placed at the top to get higher priority):
+
+[How to determine if the PVC supports snapshot?](./04_backup_and_restore_using_velero.mdx#how_to_determine_if_the_pvc_supports_snapshot)
+
+:::warning
+
+**If you use pvc snapshot backup, you cannot change the storage class when restoring. Please adjust the storage class according to the actual situation.**
+
+:::
+
+```diff
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${BACKUP_POLICY_NAME}-volume-policy
+  namespace: cpaas-system
+data:
+  resourcepolicies: |
+    version: v1
+    volumePolicies:
++      - conditions:
++          storageClass:
++            - ceph
++        action:
++          type: snapshot
+      - conditions:
+          csi: {}
+        action:
+          type: fs-backup
+      - conditions:
+          csi: {}
+        action:
+          type: fs-backup
+```
+
+:::warning
+
+If the velero is not enabled CSI snapshot, you will get the following error when backup:
+
+```
+Skip action velero.io/csi-pvc-backupper for resource persistentvolumeclaims:xxx, because the CSI feature is not enabled.
+```
+
+To fix this, you need to add `--features=EnableCSI` parameter to the velero deployment.
+
+```diff
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero
+spec:
+  template:
+    spec:
+      containers:
+      - args:
+        - server
+        - --uploader-type=restic
++        - --features=EnableCSI
+        - --namespace=cpaas-system
+        command:
+        - /velero
+        name: velero
+```
+
+:::
+
 #### Execute Backup
 
 Run the following commands to create a backup schedule and trigger a backup job:
@@ -228,6 +326,9 @@ spec:
     - ${HARBOR_NAMESPACE}
     includedResources:
     - '*'
+    resourcePolicy:
+      kind: configmap
+      name: ${BACKUP_POLICY_NAME}-volume-policy
     storageLocation: ${VELERO_BACKUP_REPO_NAME}
     ttl: 720h0m0s
 EOF
@@ -249,6 +350,9 @@ spec:
   includedResources:
     - "*"
   itemOperationTimeout: 4h0m0s
+  resourcePolicy:
+    kind: configmap
+    name: ${BACKUP_POLICY_NAME}-volume-policy
   snapshotMoveData: false
   storageLocation: ${VELERO_BACKUP_REPO_NAME}
   ttl: 720h0m0s
@@ -462,6 +566,8 @@ spec:
     - secrets
     - pods
     - harbors.operator.alaudadevops.io
+    - volumesnapshots
+    - volumesnapshotcontents
   itemOperationTimeout: 10h0m0s
   namespaceMapping:
     ${HARBOR_NAMESPACE}: ${NEW_HARBOR_NAMESPACE}
@@ -551,3 +657,47 @@ After the instance status returns to normal, log in to HARBOR to check whether t
 
 At the same time, disable the read-only mode for the restored Harbor instance (log in to Harbor and uncheck Administration -> Configuration -> System Settings -> Repository Read Only).
 
+## Q & A
+
+### How to determine if the PVC supports snapshot? \{#how_to_determine_if_the_pvc_supports_snapshot}
+
+To determine whether a PVC supports snapshot, you need to check if its underlying StorageClass supports snapshot functionality. A PVC supports snapshot if there is a VolumeSnapshotClass in the cluster whose `driver` matches the StorageClass's `provisioner`. If such a VolumeSnapshotClass exists, the StorageClass (and therefore the PVC) supports snapshot functionality.
+
+**Example Configuration:**
+
+```
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ceph
+provisioner: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  fsName: cephfs
+  pool: cephfs-data0
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-cephfs-snapshotclass
+deletionPolicy: Delete
+driver: rook-ceph.cephfs.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  csi.storage.k8s.io/snapshotter-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/snapshotter-secret-namespace: rook-ceph
+```
+
+**Key Points:**
+- StorageClass `provisioner` must exactly match VolumeSnapshotClass `driver`
+- Both resources must exist in the cluster
+- The CSI driver must support snapshot operations
