@@ -289,6 +289,8 @@ If the original instance is deployed with a storage class, the PVC names are fix
 * registry: `<instance name>-harbor-registry`
 * trivy: `data-<instance name>-harbor-trivy-0`
 
+<!-- lint ignore code-block-split-list -->
+
 ```yaml
 # New instance configuration
 helmValues:
@@ -391,10 +393,10 @@ helmValues:
 
 1. Check all Pod statuses:
 
-```bash
-export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
-kubectl get pods -n ${INSTANCE_NAMESPACE} -l release=${INSTANCE_NAME}
-```
+    ```bash
+    export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
+    kubectl get pods -n ${INSTANCE_NAMESPACE} -l release=${INSTANCE_NAME}
+    ```
 
 2. Verify Harbor service is accessible:
     * Access Harbor Web UI, verify existing projects and images are visible
