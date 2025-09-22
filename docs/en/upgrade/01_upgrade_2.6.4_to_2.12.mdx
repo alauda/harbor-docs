@@ -1,0 +1,311 @@
+# Harbor Migration Guide: From 2.6.4 to 2.12
+
+## Migration Instructions
+
+This guide describes how to upgrade Harbor from version 2.6.4 to version 2.12. Considering the large version gap and upgrade stability, we adopt a data migration approach for the upgrade. The advantages of this approach are:
+
+1. Avoiding the complexity of multiple intermediate version upgrades
+2. Reusing the registry storage data to speed up the upgrade process
+
+The overall migration process is as follows:
+
+1. Back up the PostgreSQL database and restore it to a PostgreSQL 14 instance.
+2. Stop the old Harbor instance.
+3. Deploy a new Harbor instance using the restored PostgreSQL database and the original registry storage from the old Harbor instance.
+
+:::tip Migration Duration
+The migration process primarily involves database backup and restoration, which means the migration time is directly proportional to the database size rather than the Registry storage space occupied by container images.
+
+Based on testing with a 7.6GB database, the migration typically takes approximately 18 minutes (using storage with 6000 read IOPS and 2000 write IOPS performance).
+:::
+
+## Backup
+
+Execute the following command to use pg_dump to backup the pg database of the old instance.
+
+```bash
+export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
+
+kubectl -n ${INSTANCE_NAMESPACE} exec -it ${INSTANCE_NAME}-database-0 -- bash
+
+# Execute backup command
+pg_dump -U postgres -d registry > /tmp/harbor_database.dump
+
+# Copy backup to local machine
+kubectl -n ${INSTANCE_NAMESPACE} cp ${INSTANCE_NAME}-database-0:/tmp/harbor_database.dump ./harbor_database.dump
+```
+
+:::warning Registry data backup is optional
+Registry data is typically very large, requiring additional storage for backup and taking a long time to complete, making it difficult to implement registry data backup. Additionally, Harbor instance upgrades usually do not change the registry storage structure, meaning it is feasible for the new instance to directly use the storage of the old instance.
+:::
+
+
+## Migrate Database
+
+When migrating Harbor from 2.6 to 2.12, the database version also changes, upgrading from PostgreSQL 12 to PostgreSQL 14. Therefore, it is necessary to first import the database backup from the old instance into the new database (PostgreSQL 14). Then use the data migration tool provided by Harbor to migrate the database structure and data to the structure compatible with Harbor 2.12.
+
+### Requirements
+
+Prepare a new PostgreSQL instance running version 14. The Harbor database backup will be restored to this instance, after which the database structure migration will be performed.
+
+### Restore Database
+
+Import the backed up database into the database used by the **new instance**. The following example demonstrates the import process using psql. For specific import methods, please refer to the documentation provided by the database vendor.
+
+```bash
+# Create a new database for the new PostgreSQL instance.
+# In this example, the database name is `registry`.
+dropdb -U postgres registry
+createdb -U postgres registry
+
+# The old instance uses the harbor user to connect to the database,
+# but this user may not exist in the new instance database,
+# so we need to change the user to a user that exists in the new PostgreSQL instance.
+# In this example, we use the `postgres` user.
+sed -i 's/OWNER TO harbor/OWNER TO postgres/g' /tmp/harbor_database.dump
+psql -U postgres -d registry -f /tmp/harbor_database.dump
+```
+
+:::note
+Due to database version inconsistencies, the import process may show errors about non-existent roles or functions, which can be ignored. For example:
+
+- `ERROR:  role "admin" does not exist`
+- `ERROR:  function metric_helpers.pg_stat_statements(boolean) does not exist`
+:::
+
+### Database Migration
+
+The Harbor 2.6 data has now been imported into the new instance database. Next, run the data migration job to migrate the database structure and data to the structure compatible with Harbor 2.12.
+
+Set the information for the new PostgreSQL instance, then create a job to execute the database migration:
+
+```bash
+export POSTGRESQL_HOST=<database host>
+export POSTGRESQL_PORT=<database port>
+export POSTGRESQL_USERNAME=<database username>
+export POSTGRESQL_PASSWORD=<database password>
+# Set the SSL mode to `require` if the old instance uses SSL, otherwise set it to `disable`.
+export POSTGRESQL_SSLMODE="require"
+export INSTANCE_NAMESPACE=<harbor instance namespace>
+# You can find the official migrator image in `https://hub.docker.com/r/mgle/standalone-db-migrator`,
+# import it to your private registry and set the MIGRATOR_IMAGE environment variable to use it.
+export MIGRATOR_IMAGE=docker-mirrors.alauda.cn/mgle/standalone-db-migrator:v2.12.0
+
+kubectl -n ${INSTANCE_NAMESPACE}  apply -f - << EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-db-migrate
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: harbor-migrate
+        image: ${MIGRATOR_IMAGE}
+        command: ["/harbor/migrate"]
+        env:
+        - name: POSTGRESQL_HOST
+          value: "${POSTGRESQL_HOST}"
+        - name: POSTGRESQL_PORT
+          value: "${POSTGRESQL_PORT}"
+        - name: POSTGRESQL_USERNAME
+          value: "${POSTGRESQL_USERNAME}"
+        - name: POSTGRESQL_PASSWORD
+          value: "${POSTGRESQL_PASSWORD}"
+        - name: POSTGRESQL_DATABASE
+          value: "registry"
+        - name: POSTGRESQL_SSLMODE
+          value: "${POSTGRESQL_SSLMODE}"
+EOF
+```
+
+Once the job has finished, you can view detailed migration progress and results in the job logs:
+
+```
+2024-12-23T02:43:05Z [INFO] [/cmd/standalone-db-migrator/main.go:53]: Migrating the data to latest schema...
+2024-12-23T02:43:05Z [INFO] [/cmd/standalone-db-migrator/main.go:54]: DB info: postgres://harbor@test-6-database:5432/registry?sslmode=require
+2024-12-23T02:43:05Z [INFO] [/common/dao/base.go:67]: Registering database: type-PostgreSQL host-test-6-database port-5432 database-registry sslmode-"require"
+2024-12-23T02:43:05Z [INFO] [/common/dao/base.go:72]: Register database completed
+2024-12-23T02:43:05Z [INFO] [/common/dao/pgsql.go:135]: Upgrading schema for pgsql ...
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 100/u 2.7.0_schema (184.508549ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 110/u 2.8.0_schema (275.019668ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 111/u 2.8.1_schema (286.508359ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 120/u 2.9.0_schema (357.027979ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 130/u 2.10.0_schema (378.349099ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 140/u 2.11.0_schema (399.407785ms)
+2024-12-23T02:43:05Z [INFO] [/go/pkg/mod/github.com/golang-migrate/migrate/v4@v4.18.1/migrate.go:765]: 150/u 2.12.0_schema (408.831695ms)
+2024-12-23T02:43:05Z [INFO] [/cmd/standalone-db-migrator/main.go:63]: Migration done.  The data schema in DB is now update to date.
+```
+
+## Stop the legacy Harbor instance
+
+Uninstall the harbor operator from the Operator Hub page, then scale down the legacy Harbor instance by following commands:
+
+```bash
+export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
+
+kubectl -n ${INSTANCE_NAMESPACE} scale deployment -l release=${INSTANCE_NAME} --replicas=0
+kubectl -n ${INSTANCE_NAMESPACE} scale statefulset -l release=${INSTANCE_NAME} --replicas=0
+kubectl -n ${INSTANCE_NAMESPACE} delete service -l release=${INSTANCE_NAME}
+kubectl -n ${INSTANCE_NAMESPACE} delete ingress -l release=${INSTANCE_NAME}
+```
+
+## Deploy New Harbor Instance
+
+:::tip
+The new instance needs to mount the storage of the original instance, so it needs to be **in the same namespace** as the original instance.
+:::
+
+Please deploy the new instance according to the [deployment documentation](../install/03_harbor_deploy.md), but pay attention to the following points:
+
+1. The new instance needs to connect to the migrated PG database (PostgreSQL 14)
+2. Do not reuse the Redis of the old Harbor instance, create a new one
+3. The registry storage needs to use the old instance's storage
+4. The access method needs to be consistent with the old instance to avoid affecting business usage after migration is completed
+
+Please refer to the following sections for configuration migration between old and new instances.
+
+### Get Original Instance Configuration
+
+We need to get the configuration from the original instance and convert it to the configuration of the new instance, as follows:
+
+```bash
+export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
+
+helm -n ${INSTANCE_NAMESPACE} get values ${INSTANCE_NAME}
+```
+### Convert Registry Storage Configuration
+
+If the original instance is deployed with Host Path storage, the configuration is as follows:
+
+```yaml
+# Original instance configuration
+persistence:
+  hostPath:
+    registry:
+      host:
+        nodeName: <node name>
+        path: <registry storage path>
+```
+
+Migrate to the new instance configuration:
+
+```yaml
+# New instance configuration
+helmValues:
+  persistence:
+    enabled: true
+    hostPath:
+      registry:
+        path: <registry storage path>
+
+  registry:
+    nodeSelector:
+      kubernetes.io/hostname: <node name>
+```
+
+If the original instance is deployed with a storage class, the PVC names are fixed:
+
+* registry PVC name: `<old instance name>-harbor-registry`
+
+Use the old PVC in the new instance.
+
+```yaml
+# New instance configuration
+helmValues:
+  persistence:
+    enabled: true
+    persistentVolumeClaim:
+      registry:
+        existingClaim: <old instance name>-harbor-registry
+```
+
+If the original instance is deployed with PVC, the configuration is as follows:
+
+```yaml
+# Original instance configuration
+persistence:
+  persistentVolumeClaim:
+    registry:
+      existingClaim: <registry pvc name>
+```
+
+```yaml
+# New instance configuration
+helmValues:
+  persistence:
+    enabled: true
+    persistentVolumeClaim:
+      registry:
+        existingClaim: <registry pvc name>
+```
+
+### Convert Access Method Configuration
+
+If the original instance is deployed with NodePort, set the following configuration:
+
+```yaml
+# New instance configuration
+helmValues:
+  expose:
+    type: nodePort
+    nodePort:
+      name: harbor
+      ports:
+        http:
+          port: 80
+          nodePort: <node port number>
+
+  externalURL: http://<node port ip>:<node port number>
+```
+
+If the original instance is deployed with a domain name, set the following configuration:
+
+```yaml
+# New instance http configuration
+helmValues:
+  expose:
+    type: ingress
+    tls:
+      enabled: false
+    ingress:
+      hosts:
+        core: <domain name>
+
+  externalURL: http://<domain name>
+```
+
+```yaml
+# New instance https configuration
+helmValues:
+  expose:
+    type: ingress
+    tls:
+      enabled: true
+      certSource: "secret"
+      secret:
+        secretName: <tls certificate secret>
+    ingress:
+      hosts:
+        core: <domain name>
+
+  externalURL: https://<domain name>
+```
+
+## Verification
+
+1. Check all Pod statuses:
+
+    ```bash
+    export INSTANCE_NAME=<harbor instance name> INSTANCE_NAMESPACE=<harbor instance namespace>
+    kubectl get pods -n ${INSTANCE_NAMESPACE} -l release=${INSTANCE_NAME}
+    ```
+
+2. Verify Harbor service is accessible:
+    * Access Harbor Web UI, verify existing projects and images are visible
+    * Test Docker login
+
+3. Test pushing and pulling images
+4. After confirming the migration is successful, you can manually delete the old Harbor instance.
