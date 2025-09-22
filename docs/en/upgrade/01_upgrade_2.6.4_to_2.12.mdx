@@ -13,6 +13,12 @@ The overall migration process is as follows:
 2. Stop the old Harbor instance.
 3. Deploy a new Harbor instance using the restored PostgreSQL database and the original registry storage from the old Harbor instance.
 
+:::tip Migration Duration
+The migration process primarily involves database backup and restoration, which means the migration time is directly proportional to the database size rather than the Registry storage space occupied by container images.
+
+Based on testing with a 7.6GB database, the migration typically takes approximately 18 minutes (using storage with 6000 read IOPS and 2000 write IOPS performance).
+:::
+
 ## Backup
 
 Execute the following command to use pg_dump to backup the pg database of the old instance.
