@@ -9,9 +9,54 @@ This guide describes how to upgrade Harbor from version 2.6.4 to version 2.12. C
 
 The overall migration process is as follows:
 
-1. Back up the PostgreSQL database and restore it to a PostgreSQL 14 instance.
-2. Stop the old Harbor instance.
-3. Deploy a new Harbor instance using the restored PostgreSQL database and the original registry storage from the old Harbor instance.
+1. Migrate chart data to registry storage.
+2. Back up the PostgreSQL database and restore it to a PostgreSQL 14 instance.
+3. Stop the old Harbor instance.
+4. Deploy a new Harbor instance using the restored PostgreSQL database and the original registry storage from the old Harbor instance.
+
+## Migrate Chart Data
+
+Harbor supports two different ways to store the Helms charts data: 1. stored in Harbor registry storage directly via OCI API. 2. stored in Harbor hosted chartmuseum backend via chartmuseum's API.
+
+From Harbor 2.6, [Chartmuseum](https://github.com/chartmuseum/chartmuseum) is deprecated and is removed from Harbor 2.8. So if the old instance is using chartmuseum, you need to migrate the chart data to registry storage.
+
+### Requirements
+
+- docker installed on your local machine.
+- [Helm in version 3.8+](https://helm.sh/docs/intro/install/).
+
+### Migrate Chart Data
+
+The tool copies Helm charts but does not delete them from Chartmuseum.
+
+Migrate the chart data to registry storage:
+```bash
+export HARBOR_URL=<harbor url>
+export HARBOR_USER=<harbor username>
+export HARBOR_PASSWORD=<harbor password>
+# if harbor is http, add --plain-http, more params run `docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g61e63ac --help`
+docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g61e63ac --url $HARBOR_URL --username $HARBOR_USER --password $HARBOR_PASSWORD
+```
+
+expected output:
+```bash
+2023/06/28 16:17:32 416 Helm charts to migrate from Chartmuseum to OCI
+   100% |████████████████████████████████████████████████████████████████████████████████████████████| (416/416, 20 it/min)
+2023/06/28 16:38:14 416 Helm charts successfully migrated from Chartmuseum to OCI
+```
+
+If you only want to migrate a part of the data to registry storage, you can [filter the data by project according to the documentation](https://github.com/goharbor/chartmuseum-migration-tools/tree/main/chartmuseum2oci#project-filtering).
+
+For information on how to use OCI Helm charts, please refer to the following documentation:
+
+- [Working with OCI Helm Charts](https://goharbor.io/docs/2.12.0/working-with-projects/working-with-oci/working-with-helm-oci-charts/)
+- [Helm OCI documentation](https://helm.sh/docs/topics/registries/#using-an-oci-based-registry)
+
+:::info
+Since Harbor 2.8 no longer supports chartmuseum, we have decided to discontinue providing related support.
+
+If you still want to use chart repositories managed by chartmuseum, please contact us for support.
+:::
 
 :::tip Migration Duration
 The migration process primarily involves database backup and restoration, which means the migration time is directly proportional to the database size rather than the Registry storage space occupied by container images.
@@ -38,7 +83,6 @@ kubectl -n ${INSTANCE_NAMESPACE} cp ${INSTANCE_NAME}-database-0:/tmp/harbor_data
 :::warning Registry data backup is optional
 Registry data is typically very large, requiring additional storage for backup and taking a long time to complete, making it difficult to implement registry data backup. Additionally, Harbor instance upgrades usually do not change the registry storage structure, meaning it is feasible for the new instance to directly use the storage of the old instance.
 :::
-
 
 ## Migrate Database
 
@@ -307,5 +351,8 @@ helmValues:
     * Access Harbor Web UI, verify existing projects and images are visible
     * Test Docker login
 
-3. Test pushing and pulling images
+3. Test pushing and pulling images/charts.
+    * Test pushing and pulling images
+    * Test pushing and pulling oci charts(optional)
+
 4. After confirming the migration is successful, you can manually delete the old Harbor instance.
