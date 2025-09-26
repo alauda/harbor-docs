@@ -1,0 +1,98 @@
+# PostgreSQL Connection Limit Error
+
+## Problem Description
+
+Harbor component logs (for example core, jobservice) show database errors such as:
+
+```
+2025-09-24T06:36:11Z [ERROR] [/lib/http/error.go:54]: {"errors":[{"code":"UNKNOWN","message":"unknown: pq: sorry, too many clients already"}]}
+2025-09-24T06:36:11Z [ERROR] [/lib/orm/orm.go:72]: begin transaction failed: pq: sorry, too many clients already
+2025-09-24T06:36:11Z [ERROR] [/lib/http/error.go:54]: {"errors":[{"code":"UNKNOWN","message":"unknown: pq: sorry, too many clients already"}]}
+2025-09-24T06:36:11Z [ERROR] [/lib/orm/orm.go:72]: begin transaction failed: pq: sorry, too many clients already
+2025-09-24T06:36:11Z [WARNING] [/controller/quota/controller.go:334][requestID="9a20e70b-18ba-46b7-9e5a-dfa80a8fc05d"]: unreserve resources {"storage":14872} for project 9437 failed, error: pq: sorry, too many clients already
+```
+
+## Root Cause
+
+Harbor opened more concurrent PostgreSQL connections than the database allows (exceeded PostgreSQL `max_connections`).
+
+## Troubleshooting
+
+Check the logs of the Harbor Core Deployment. Confirm if the `pq: sorry, too many clients already` error message is present.
+
+```bash
+kubectl -n <NAMESPACE> logs <RELEASE>-harbor-core-xxxxx
+```
+
+## Solution
+
+You have two modification paths—choose one or both depending on your diagnosis.
+
+Decide whether PG's maximum is too low or Harbor's per-pod pool is too high for your replica count, then adjust the values.
+After your change, peak Harbor connections remain below PG's limit.
+
+### Path 1 - Increase PostgreSQL capacity
+
+If PostgreSQL's `max_connections` is too low for your Harbor scale, increase it on your PostgreSQL side. The exact steps depend on how you manage PG and are out of scope here.
+
+You can use the following command to check PostgreSQL capacity and current usage:
+
+```sql
+-- Show the global upper limit on concurrent connections allowed by this PostgreSQL instance.
+-- Note: the effective limit available to non-superusers ≈ max_connections - superuser_reserved_connections.
+SHOW max_connections;
+
+-- Show how many connections are reserved for superusers,
+-- so administrators can still log in when all regular slots are taken.
+SHOW superuser_reserved_connections;
+
+-- Count the total number of currently open backend connections across all databases and states
+-- (e.g., active, idle, idle in transaction, autovacuum, replication).
+SELECT count(*) AS current_connections FROM pg_stat_activity;
+```
+
+### Path 2 - Tune Harbor's DB pool
+
+If Harbor is opening too many connections, **reduce Harbor's pool settings**. Remember:
+
+- `database.maxOpenConns` is applied per Pod (each Harbor component instance); scaling replicas increases total potential connections.
+- When you change `maxOpenConns`, review `maxIdleConns` so it remains sensible (commonly ≤ `maxOpenConns`).
+
+#### Step 1 - Patch the CR with new values
+
+Replace `<NAME>` with your Harbor CR name and `<NAMESPACE>` with your Harbor CR namespace.
+Replace `<MAX_OPEN_CONNS>` and `<MAX_IDLE_CONNS>` with your desired values.
+
+```bash
+kubectl -n <NAMESPACE> patch harbors.operator.alaudadevops.io <NAME> --type merge \
+  -p '{
+    "spec": {
+      "helmValues": {
+        "database": {
+          "maxOpenConns": <MAX_OPEN_CONNS>,
+          "maxIdleConns": <MAX_IDLE_CONNS>
+        }
+      }
+    }
+  }'
+```
+
+#### Step 2 - Validate that settings took effect
+
+Check the rendered configuration reflects the new values.
+
+```bash
+kubectl -n <NAMESPACE> get cm <RELEASE>-harbor-core -o yaml | \
+  egrep 'POSTGRESQL_MAX_(OPEN|IDLE)_CONNS'
+```
+
+The output should look like this, the value should be **the same as you specified in the patch command**:
+
+```
+  POSTGRESQL_MAX_IDLE_CONNS: "40"
+  POSTGRESQL_MAX_OPEN_CONNS: "80"
+```
+
+#### Step 3 - Check Harbor runs smoothly
+
+After your change, peak Harbor connections remain below PG's limit.
