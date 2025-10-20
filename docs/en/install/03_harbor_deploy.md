@@ -124,9 +124,7 @@ Complete the deployment by filling in the relevant information according to the 
 
 YAML deployment is the most basic and powerful deployment capability. Here we provide corresponding YAML snippets for each dimension from the `Deployment Planning` section, and then provide two complete YAML examples for complete scenarios to help users understand the YAML configuration method and make configuration changes as needed.
 
-#### YAML Snippets Based on Deployment Planning
-
-##### High Availability
+#### High Availability (YAML Snippets)
 
 In high availability mode, Harbor component replicas should be at least 2. The YAML configuration snippet is as follows:
 
@@ -143,7 +141,7 @@ spec:
       replicas: 2
 ```
 
-##### Storage
+#### Storage (YAML Snippets)
 
 Harbor data storage mainly includes two parts:
 
@@ -219,10 +217,42 @@ spec:
     trivy:
       nodeSelector:
         kubernetes.io/hostname: <node name>
-    
 ```
 
-##### Network Access
+Configure Object Storage (S3) as the Registry storage backend:
+
+- The Object Storage bucket must be created in advance.
+- The [`object-storage-secret`](./02_harbor_credential.md#object-storage-credentials) secret must be created in advance.
+
+  ```yaml
+  spec:
+    helmValues:
+      harbor:
+        persistence:
+          enabled: true
+          imageChartStorage:
+            disableredirect: true
+            s3:
+              existingSecret: object-storage-secret # Secret containing S3 access key and secret key
+              bucket: harbor # S3 bucket name (must be pre-created)
+              region: us-east-1 # S3 region (required for AWS S3, optional for MinIO/Ceph)
+              regionendpoint: http://xxxxx # S3 cluster endpoint URL (include port if required)
+              v4auth: true
+            type: s3
+          persistentVolumeClaim:
+            jobservice:
+              jobLog:
+                existingClaim: <jobservice component pvc>
+            trivy:
+              existingClaim: <trivy component pvc>
+  ```
+
+:::info
+Harbor currently only supports configuring the Registry component to use S3 storage. Other components will continue to use PVC or StorageClass for persistent storage.
+
+:::
+
+#### Network Access (YAML Snippets)
 
 Network access mainly includes two methods: domain name access and NodePort access.
 

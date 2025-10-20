@@ -1,5 +1,5 @@
 ---
-title: "Configuring Redis, PostgreSQL, and Account Access Credentials"
+title: "Configuring Redis, PostgreSQL, ObjectStorage(s3) and Account Access Credentials"
 description: ""
 weight: 100
 ---
@@ -205,6 +205,27 @@ data:
 kind: Secret
 metadata:
   name: harbor-admin-password
+  namespace: <ns-of-harbor-instance>
+type: Opaque
+```
+
+## Object Storage Credentials \{#object-storage-credentials}
+
+When the harbor use ObjectStorage as the Registry storage backend, need to create secret to store Object Storage Credentials.
+
+| Field                             | Description                   | Example Value  |
+| --------------------------------- | ------------------------------| --------------------------------------------- |
+| **REGISTRY_STORAGE_S3_ACCESSKEY** | The ObjectStorage access key. | `XVOHXUQ5QMKSA10O7ZI2`                        |
+| **REGISTRY_STORAGE_S3_SECRETKEY** | The ObjectStorage secret key. | `X4Dz4IQzpcwQMeshNY2g3skWwDgM12RIJsDrJuG5`    |
+
+```yaml
+apiVersion: v1
+data:
+  REGISTRY_STORAGE_S3_ACCESSKEY: <base64 encode access key>
+  REGISTRY_STORAGE_S3_SECRETKEY: <base64 encoded secret key>
+kind: Secret
+metadata:
+  name: object-storage-secret
   namespace: <ns-of-harbor-instance>
 type: Opaque
 ```
