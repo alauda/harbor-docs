@@ -1,0 +1,39 @@
+# Configure Job Log Storage
+
+The Harbor Job Service supports storing job logs in multiple locations:
+
+- **file**: Saves logs to local storage. If the Job Service runs on multiple nodes, a PVC must be mounted to provide shared storage.
+- **database**: Saves logs to the database.
+- **stdout**: Saves logs to pod stdout (not recommended for production use).
+
+## Store Job Logs on Local Storage \{#store-job-log-to-local}
+
+Add the following configuration to your Harbor instance:
+
+```yaml
+spec:
+  helmValues:
+    jobservice:
+      jobLoggers:
+        - file
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        jobservice:
+          jobLog:
+            storageClass: <storage-class-name>
+            accessMode: ReadWriteMany
+            size: <storage-size>
+```
+
+## Store Job Logs in the Database \{#store-job-log-to-db}
+
+Add the following configuration to your Harbor instance:
+
+```yaml
+spec:
+  helmValues:
+    jobservice:
+      jobLoggers:
+        - database
+```

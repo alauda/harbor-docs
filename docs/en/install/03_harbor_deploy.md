@@ -42,11 +42,20 @@ According to community recommendations and practices, a non-high-availability Ha
 
 **Storage**
 
+::: tip Storage Selection Guide
+| Component | Supported Storage Type | Description |
+|---| ---| ---|
+| Registry | object storage (e.g., MinIO)<br >file storage (e.g., Ceph FS) | For scenarios with high pull image concurrency, it is recommended to use object storage and enable the redirect feature.<br />The sequential read/write throughput of the storage disk (with a 1 MB block size) should not be lower than 100 MiB/s. |
+| JobService | file storage (e.g., Ceph FS) | Job logs can also be [stored in the database](../howto/07_configure_job_log_storage.mdx#store-job-log-to-db), in which case it is not necessary to configure storage for the job service. |
+| Trivy | file storage (e.g., Ceph FS) | The Trivy component uses storage to save its `trivy db` and scan cache |
+
+:::
+
 - Common storage methods provided by the platform can be used for Harbor, such as storage classes, persistent volume claims, node storage, etc.
 
 - Node storage is not suitable for `high availability` mode, as it stores files in a specified path on the host node
 
-- In addition, Harbor also supports object storage. In this mode, separate storage access method adaptation is required. Please consult the vendor for details.
+- Additionally, Harbor supports object storage. For configuration instructions, see [Using Object Storage as the Registry Storage Backend](#storage-yaml-snippets).
 
 **Network**
 
@@ -60,6 +69,10 @@ According to community recommendations and practices, a non-high-availability Ha
 
 **Redis**
 
+::: tip Redis Component Storage Selection Guide
+It is recommended to use block storage (e.g., TopoLVM) to achieve higher IOPS and lower latency.
+:::
+
 - The current Redis component version that Harbor depends on is v6. It is recommended to use the Redis Operator provided by the platform to deploy Redis instances, and then complete Redis integration by configuring access credentials.
 
    - Redis access is accomplished by configuring a `secret` resource with specific format content. See [Configure Redis, PostgreSQL, and Account Access Credentials](./02_harbor_credential) for details.
@@ -67,6 +80,10 @@ According to community recommendations and practices, a non-high-availability Ha
 - **Known Issue**: [Modify Harbor Project Permissions Prompt Internal Server Error](../trouble_shooting/01_modify_project_permissions_error.mdx)
 
 **PostgreSQL**
+
+::: tip PostgreSQL Component Storage Selection Guide
+It is recommended to use block storage (e.g., TopoLVM) to achieve higher IOPS and lower latency.
+:::
 
 - The current PostgreSQL component version that Harbor depends on is v14. It is recommended to use the PostgreSQL Operator provided by the platform to deploy PostgreSQL instances, and then complete PostgreSQL integration by configuring access credentials.
 
@@ -222,7 +239,7 @@ spec:
 Configure Object Storage (S3) as the Registry storage backend:
 
 - The Object Storage bucket must be created in advance.
-- The [`object-storage-secret`](./02_harbor_credential.md#object-storage-credentials) secret must be created in advance.
+- The [`<object-storage-secret>`](./02_harbor_credential.md#object-storage-credentials) secret must be created in advance.
 
   ```yaml
   spec:
@@ -233,10 +250,10 @@ Configure Object Storage (S3) as the Registry storage backend:
           imageChartStorage:
             disableredirect: true
             s3:
-              existingSecret: object-storage-secret # Secret containing S3 access key and secret key
-              bucket: harbor # S3 bucket name (must be pre-created)
-              region: us-east-1 # S3 region (required for AWS S3, optional for MinIO/Ceph)
-              regionendpoint: http://xxxxx # S3 cluster endpoint URL (include port if required)
+              existingSecret: <object-storage-secret>
+              bucket: <bucket>
+              region: <region>
+              regionendpoint: <regionendpoint>
               v4auth: true
             type: s3
           persistentVolumeClaim:
@@ -246,6 +263,14 @@ Configure Object Storage (S3) as the Registry storage backend:
             trivy:
               existingClaim: <trivy component pvc>
   ```
+
+| Field | Description | Example Value |
+|-------|-------------|---------------|
+| object-storage-secret | Secret containing S3 access key and secret key, see [Object Storage Credentials](./02_harbor_credential.md#object-storage-credentials) for details | `object-storage-secret` |
+| bucket | Name of the object storage bucket | `harbor-registry` |
+| regionendpoint | Endpoint URL of the object storage service (include port if needed) | `http://192.168.133.37:32227` |
+| region | Region of the object storage (typically `us-east-1` for MinIO) | `us-east-1` |
+
 
 :::info
 Harbor currently only supports configuring the Registry component to use S3 storage. Other components will continue to use PVC or StorageClass for persistent storage.
@@ -268,7 +293,7 @@ spec:
       ingress:
         hosts:
           core: <domain name>
-    
+
     externalURL: http://<domain name>
 ```
 
@@ -285,7 +310,7 @@ spec:
           http:
             port: 80
             nodePort: <port number>
-    
+
     externalURL: http://<node IP>:<port number>
 ```
 
@@ -298,7 +323,7 @@ Standalone example:
 ```yaml
 spec:
   helmValues:
-    database:    
+    database:
     redis:
       external:
         addr: "<redis access address>:<redis port>"
@@ -312,7 +337,7 @@ Sentinel example:
 ```yaml
 spec:
   helmValues:
-    database:    
+    database:
     redis:
       external:
         addr: "<sentinel1 access address>:<sentinel1 port>,<sentinel2 access address>:<sentinel2 port>,<sentinel3 access address>:<sentinel3 port>"
@@ -471,7 +496,7 @@ spec:
       persistentVolumeClaim:
         registry:
           storageClass: ceph # Registry component storage class
-          accessMode: ReadWriteMany 
+          accessMode: ReadWriteMany
           size: 10Gi # Registry component storage size
         jobservice:
           jobLog:
