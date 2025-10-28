@@ -229,3 +229,33 @@ metadata:
   namespace: <ns-of-harbor-instance>
 type: Opaque
 ```
+
+The following policy is required by the Registry for push and pull. Make sure to replace `S3_BUCKET_NAME` with the name of your bucket.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::S3_BUCKET_NAME"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListMultipartUploadParts",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::S3_BUCKET_NAME/*"
+    }
+  ]
+}
+```
