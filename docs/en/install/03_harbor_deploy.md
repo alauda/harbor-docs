@@ -47,11 +47,13 @@ According to community recommendations and practices, a non-high-availability Ha
 |---| ---| ---|
 | Registry | object storage (e.g., MinIO)<br >file storage (e.g., Ceph FS) | For scenarios with high pull image concurrency, it is recommended to use object storage and enable the redirect feature.<br />The sequential read/write throughput of the storage disk (with a 1 MB block size) should not be lower than 100 MiB/s. |
 | JobService | file storage (e.g., Ceph FS) | Job logs can also be [stored in the database](../howto/07_configure_job_log_storage.mdx#store-job-log-to-db), in which case it is not necessary to configure storage for the job service. |
-| Trivy | file storage (e.g., Ceph FS) | The Trivy component uses storage to save its `trivy db` and scan cache |
+| Trivy | file storage (e.g., Ceph FS) | Stores the vulnerability database and cache; persistence is optional.<br />Without persistence, it falls back to `emptyDir`, so restarts re-download the DB and temporarily halt scans. |
 
 :::
 
 - Common storage methods provided by the platform can be used for Harbor, such as storage classes, persistent volume claims, node storage, etc.
+
+- To intentionally skip persistence for Trivy, leave `spec.helmValues.persistence.persistentVolumeClaim.trivy.storageClass` unset. The vulnerability database then lives on an `emptyDir` volume, so each Trivy pod restart triggers a full database download and blocks vulnerability scans until it completes.
 
 - Node storage is not suitable for `high availability` mode, as it stores files in a specified path on the host node
 
@@ -136,6 +138,22 @@ To achieve Harbor high availability, external dependencies must meet the followi
 
 Complete the deployment by filling in the relevant information according to the template prompts.
 
+### Deploying from the `Harbor Object Storage` Template
+
+Deploy a Harbor instance based on object storage.
+
+- Compute resources: 8 CPU cores, 16 Gi memory
+- Storage: Image files use object storage, and background task logs use database storage
+- Network access: Use Ingress to access the service, and specify the domain name
+- Dependencies: Configure existing Redis and PostgreSQL access credentials, and separately configure the access credentials for another independent database in the PG instance for the Gitaly component
+- Other settings: Configure account credentials, SSO feature is disabled by default
+
+In this template the Trivy scanner does not persist data; it mounts an `emptyDir`, so every pod restart downloads the vulnerability database again and temporarily blocks new scans until the sync finishes.
+
+Verify that the object storage credentials you supply meet the required S3 API permissions, see [Object Storage Credentials](./02_harbor_credential.md#object-storage-credentials).
+
+Complete the deployment by filling in the relevant information according to the template prompts.
+
 ### Deploying from YAML
 
 
@@ -160,14 +178,20 @@ spec:
 
 #### Storage (YAML Snippets)
 
-Harbor data storage mainly includes two parts:
+Harbor data storage mainly includes three parts:
 
 - Registry: Manages and stores container images and artifacts. It handles image upload, download, and storage operations.
 - Jobservice: Executes background tasks like image replication between registries, garbage collection, and other scheduled or on-demand jobs.
 - Trivy: Performs vulnerability scans on container images to identify security issues and ensure compliance with security policies.
 
 Currently, three storage configuration methods are supported: storage class, PVC, and local node storage.
-When using storage class or pvc, the storage must support multi-node read and write (ReadWriteMany)
+When using storage class or pvc, the storage must support multi-node read and write (ReadWriteMany).
+
+For Registry, Object Storage (S3) can also be used as the storage backend.
+
+Jobservice supports storing job logs in multiple locations (file, database. stdout).
+If you haven't chosen to output the jobservice logs to file, 
+there's no need to configure a storage backend for jobservice. See [Configure Job Log Storage](../howto/07_configure_job_log_storage.mdx) for details.
 
 Storage class configuration snippet:
 
@@ -264,12 +288,13 @@ Configure Object Storage (S3) as the Registry storage backend:
               existingClaim: <trivy component pvc>
   ```
 
-| Field | Description | Example Value |
-|-------|-------------|---------------|
-| object-storage-secret | Secret containing S3 access key and secret key, see [Object Storage Credentials](./02_harbor_credential.md#object-storage-credentials) for details | `object-storage-secret` |
-| bucket | Name of the object storage bucket | `harbor-registry` |
-| regionendpoint | Endpoint URL of the object storage service (include port if needed) | `http://192.168.133.37:32227` |
-| region | Region of the object storage (typically `us-east-1` for MinIO) | `us-east-1` |
+| Field                 | Description                                                                                                                                                                        | Example Value                 |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|
+| object-storage-secret | Secret containing S3 access key and secret key, see [Object Storage Credentials](./02_harbor_credential.md#object-storage-credentials) for details                                 | `object-storage-secret`       |
+| bucket                | Name of the object storage bucket                                                                                                                                                  | `harbor-registry`             |
+| regionendpoint        | Endpoint URL of the object storage service (include port if needed)                                                                                                                | `http://192.168.133.37:32227` |
+| region                | Region of the object storage (typically `us-east-1` for MinIO)                                                                                                                     | `us-east-1`                   |
+| disableredirect       | Set to false to enable redirect and improve pull performance. Harbor will return temporary S3 URLs for layers, so clients must reach the S3 endpoint or layer downloads will fail) | `true`                        |
 
 
 :::info
