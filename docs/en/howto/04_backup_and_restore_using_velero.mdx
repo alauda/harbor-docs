@@ -624,24 +624,24 @@ The new instance CR resource may need the following modifications. Please adjust
    - **Recommendation**:
      - (Recommended) Change the original instance's domain to a temporary domain, keep the new instance unchanged
      - Or keep the original instance unchanged, and change the new instance to a new domain
-   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.md#network-access-yaml-snippets)
+   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.mdx#network-access-yaml-snippets)
 2. **NodePort**:
    - **Applicable scenario**: The original instance was deployed using NodePort
    - **Reason**: The same NodePort in the Service resources of the old and new instances will cause conflicts, resulting in the failure to create the Service for the new instance
    - **Recommendation**:
      - (Recommended) Change the original instance's NodePort to a temporary port, keep the new instance unchanged
      - Or keep the original instance unchanged, and change the new instance to a new port
-   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.md#network-access-yaml-snippets)
+   - **How to modify**: See [Configure Instance Network Access](../install/03_harbor_deploy.mdx#network-access-yaml-snippets)
 3. **Storage Class**:
    - **Applicable scenario**: The storage class of the old and new instances is different (e.g., the original used NFS, the new uses Ceph)
    - **Reason**: If not modified, the Operator will still use the old storage class to create PVCs, which will conflict with the restored PVCs
    - **Recommendation**: Change to the correct storage class
-   - **How to modify**: See [Configure Instance Storage](../install/03_harbor_deploy.md#storage-yaml-snippets)
+   - **How to modify**: See [Configure Instance Storage](../install/03_harbor_deploy.mdx#storage-yaml-snippets)
 4. **PostgreSQL Connection Information**:
    - **Applicable scenario**: The new and old instances use different PostgreSQL instances or databases
    - **Reason**: If not modified, the new instance will still connect to the old database
    - **Recommendation**: Change to the correct connection information
-   - **How to modify**: See [Configure PostgreSQL Credentials](../install/03_harbor_deploy.md#configure-postgresql-credentials)
+   - **How to modify**: See [Configure PostgreSQL Credentials](../install/03_harbor_deploy.mdx#configure-postgresql-credentials)
 
 #### Deploy HARBOR CE Operator
 
