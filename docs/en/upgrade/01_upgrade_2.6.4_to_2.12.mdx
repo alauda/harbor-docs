@@ -202,7 +202,7 @@ kubectl -n ${INSTANCE_NAMESPACE} delete ingress -l release=${INSTANCE_NAME}
 The new instance needs to mount the storage of the original instance, so it needs to be **in the same namespace** as the original instance.
 :::
 
-Please deploy the new instance according to the [deployment documentation](../install/03_harbor_deploy.md), but pay attention to the following points:
+Please deploy the new instance according to the [deployment documentation](../install/03_harbor_deploy.mdx), but pay attention to the following points:
 
 1. The new instance needs to connect to the migrated PG database (PostgreSQL 14)
 2. Do not reuse the Redis of the old Harbor instance, create a new one
