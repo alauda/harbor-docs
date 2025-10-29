@@ -232,6 +232,8 @@ type: Opaque
 
 The following policy is required by the Registry for push and pull. Make sure to replace `S3_BUCKET_NAME` with the name of your bucket.
 
+If you do not have an account yet, please create one first and attach the following policy.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -259,3 +261,5 @@ The following policy is required by the Registry for push and pull. Make sure to
   ]
 }
 ```
+
+For more information about storage, please refer to [Harbor Storage](./03_harbor_deploy.md#storage-yaml-snippets).

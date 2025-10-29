@@ -262,6 +262,7 @@ spec:
 
 Configure Object Storage (S3) as the Registry storage backend:
 
+- Use Amazon S3 or S3 compatible services for object storage, such as MinIO, Ceph.
 - The Object Storage bucket must be created in advance.
 - The [`<object-storage-secret>`](./02_harbor_credential.md#object-storage-credentials) secret must be created in advance.
 
@@ -291,11 +292,14 @@ Configure Object Storage (S3) as the Registry storage backend:
 | Field                 | Description                                                                                                                                                                        | Example Value                 |
 |-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|
 | object-storage-secret | Secret containing S3 access key and secret key, see [Object Storage Credentials](./02_harbor_credential.md#object-storage-credentials) for details                                 | `object-storage-secret`       |
-| bucket                | Name of the object storage bucket                                                                                                                                                  | `harbor-registry`             |
+| bucket                | Name of the object storage bucket, which must be created in advance                                                                                                                | `harbor-registry`             |
 | regionendpoint        | Endpoint URL of the object storage service (include port if needed)                                                                                                                | `http://192.168.133.37:32227` |
 | region                | Region of the object storage (typically `us-east-1` for MinIO)                                                                                                                     | `us-east-1`                   |
 | disableredirect       | Set to false to enable redirect and improve pull performance. Harbor will return temporary S3 URLs for layers, so clients must reach the S3 endpoint or layer downloads will fail) | `true`                        |
 
+For more details, see [S3 storage driver](https://distribution.github.io/distribution/storage-drivers/s3/)
+
+If you want to use Ceph in platform, please refer to <ExternalSiteLink name="container_platform" href="/storage/storagesystem_ceph/index.html" children="Ceph Distributed Storage" />.
 
 :::info
 Harbor currently only supports configuring the Registry component to use S3 storage. Other components will continue to use PVC or StorageClass for persistent storage.
