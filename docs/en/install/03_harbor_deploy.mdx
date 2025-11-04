@@ -67,7 +67,7 @@ According to community recommendations and practices, a non-high-availability Ha
 
    - `Ingress` requires specifying a domain name and ensuring that the domain name resolution is normal
 
-- The platform supports HTTPS protocol, which needs to be configured after instance deployment. See [Configure HTTPS](#harbor_https) for details.
+- The platform supports HTTPS protocol, which needs to be configured after instance deployment. See [Configure HTTPS](./03_harbor_deploy.mdx#configure-https) for details.
 
 **Redis**
 
@@ -97,7 +97,7 @@ When initializing a Harbor instance, you need to configure the admin account and
 
 ### Post-deployment Configuration Planning
 
-Post-deployment configuration planning refers to planning that does not require decisions before deployment, but can be changed as needed through standardized operations after deployment. This mainly includes Single Sign-On (SSO), HTTPS configuration, external load balancer configuration, etc. Please refer to [Subsequent Operations](#harbor_day2) for details.
+Post-deployment configuration planning refers to planning that does not require decisions before deployment, but can be changed as needed through standardized operations after deployment. This mainly includes Single Sign-On (SSO), HTTPS configuration, external load balancer configuration, etc. Please refer to [Subsequent Operations](./03_harbor_deploy.mdx#subsequent-operations) for details.
 
 
 ## Instance Deployment
@@ -601,9 +601,17 @@ spec:
 
 ```
 
-## <span id ="harbor_day2">Subsequent Operations</span>
+## Subsequent Operations \{#subsequent-operations}
 
-### <span id ="harbor_sso">Configuring Single Sign-On (SSO)</span>
+### Configuring Single Sign-On (SSO) \{#configure-sso}
+
+:::warning
+
+You can change the authentication mode from database to OIDC only if no local users have been added to the database. If there is at least one user other than admin in the Harbor database, you cannot change the authentication mode.
+
+details refer: [Configure OIDC Provider Authentication](https://goharbor.io/docs/2.12.0/administration/configure-authentication/oidc-auth/)
+
+:::
 
 Configuring SSO involves the following steps:
 
@@ -618,7 +626,7 @@ apiVersion: dex.coreos.com/v1
 kind: OAuth2Client
 name: OIDC
 metadata:
-  name: m5uxi3dbmiwwizlyzpzjzzeeeirsk # This value is calculated based on the hash of the id field, online calculator: https://go.dev/play/p/QsoqUohsKok
+  name: nbqxeytpoiwwizlyzpzjzzeeeirsk # This value is calculated based on the hash of the id field, online calculator: https://go.dev/play/p/QsoqUohsKok
   namespace: cpaas-system
 alignPasswordDB: true
 id: harbor-dex # Client id
@@ -628,6 +636,15 @@ redirectURIs:
 secret: Z2l0bGFiLW9mZmljaWFsLTAK # Client secret
 spec: {}
 ```
+
+| Field | Description | Example |
+|-------|-------------|---------|
+|name| The display name of the resource. | OIDC|
+|id| The client ID used for SSO authentication. Can be set to any value. <div> `id` can not set as `alauda-dex`, this is a reserved value that may cause conflicts.</div>| harbor-dex |
+|secret| The client secret used for SSO authentication. Can be set to any value. | Z2l0bGFiLW9mZmljaWFsLTAK|
+|metadata.name| The resource name, which must be calculated based on the hash of the `id` field. You can use online hash calculators such as https://go.dev/play/p/QsoqUohsKok to generate it. | nbqxeytpoiwwizlyzpzjzzeeeirsk |
+|redirectURIs | The third-party product URL. Harbor requires the format: `<harbor access address>/c/oidc/callback` | https://harbor.com/c/oidc/callback|
+|metadata.namespace| The platform system namespace. Defaults to `cpaas-system`. | cpaas-system|
 
 Edit the Harbor instance to add the following configuration:
 
@@ -641,7 +658,7 @@ spec:
       issuer: "<platform access address>/dex"
 ```
 
-### <span id ="harbor_https">Configuring HTTPS</span>
+### Configuring HTTPS \{#configure-https}
 
 After deploying the Harbor instance, HTTPS can be configured as needed.
 
@@ -676,7 +693,7 @@ expose:
 externalURL: https://<domain name>
 ```
 
-### <span id ="harbor_https">Configuring Image Scanning Vulnerability Database Policy</span>
+### Configuring Image Scanning Vulnerability Database Policy
 Harbor's image scanning functionality is implemented by the Trivy component. Considering the user's network environment, the default vulnerability database policy for this component is to use the built-in offline vulnerability database. Since the vulnerability database is not updated, it cannot detect new vulnerabilities in a timely manner.
 
 If you want to keep the vulnerability database up-to-date, you can edit the Harbor instance's YAML configuration to enable the online update policy (this policy requires access to GitHub):
