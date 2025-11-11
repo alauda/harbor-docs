@@ -34,8 +34,10 @@ Migrate the chart data to registry storage:
 export HARBOR_URL=<harbor url>
 export HARBOR_USER=<harbor username>
 export HARBOR_PASSWORD=<harbor password>
-# if harbor is http, add --plain-http, more params run `docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g61e63ac --help`
-docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g61e63ac --url $HARBOR_URL --username $HARBOR_USER --password $HARBOR_PASSWORD
+# if harbor is http, add -plain-http
+# if harbor is self-signed https, add -insecure
+# more params run `docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --help`
+docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --url $HARBOR_URL --username $HARBOR_USER --password $HARBOR_PASSWORD
 ```
 
 expected output:
@@ -115,6 +117,8 @@ Due to database version inconsistencies, the import process may show errors abou
 
 - `ERROR:  role "admin" does not exist`
 - `ERROR:  function metric_helpers.pg_stat_statements(boolean) does not exist`
+- `ERROR:  schema "metric_helpers" already exists`
+- `ERROR:  function "get_btree_bloat_approx" already exists with same argument types`
 :::
 
 ### Database Migration
@@ -222,7 +226,7 @@ helm -n ${INSTANCE_NAMESPACE} get values ${INSTANCE_NAME}
 ```
 ### Convert Registry Storage Configuration
 
-If the original instance is deployed with Host Path storage, the configuration is as follows:
+If the original instance is **deployed with Host Path storage**, the configuration is as follows:
 
 ```yaml
 # Original instance configuration
@@ -250,7 +254,7 @@ helmValues:
       kubernetes.io/hostname: <node name>
 ```
 
-If the original instance is deployed with a storage class, the PVC names are fixed:
+If the original instance is **deployed with a storage class**, the PVC names are fixed:
 
 * registry PVC name: `<old instance name>-harbor-registry`
 
@@ -266,7 +270,7 @@ helmValues:
         existingClaim: <old instance name>-harbor-registry
 ```
 
-If the original instance is deployed with PVC, the configuration is as follows:
+If the original instance is **deployed with PVC**, the configuration is as follows:
 
 ```yaml
 # Original instance configuration
@@ -355,4 +359,4 @@ helmValues:
     * Test pushing and pulling images
     * Test pushing and pulling oci charts(optional)
 
-4. After confirming the migration is successful, you can manually delete the old Harbor instance.
+4. After confirming the migration is successful, you can manually delete the old Harbor instance in `DevOps Toolchain/Instances/` page.

@@ -1,10 +1,10 @@
 # Documentation Sync Information
 
-- **Last synced**: 2025-11-04 03:35:45 UTC
+- **Last synced**: 2025-11-11 02:22:53 UTC
 - **Source repository**: alaudadevops/harbor-ce-operator
-- **Source commit**: [0b91f1af5dc417df51103a5d422cdff0b4faac6b](https://github.com/alaudadevops/harbor-ce-operator/commit/0b91f1af5dc417df51103a5d422cdff0b4faac6b)
+- **Source commit**: [31c6b1743c0e1168629a40c483dfcb9ce3ba159d](https://github.com/alaudadevops/harbor-ce-operator/commit/31c6b1743c0e1168629a40c483dfcb9ce3ba159d)
 - **Triggered by**: edge-katanomi-app2[bot]
-- **Workflow run**: [#34](https://github.com/alaudadevops/harbor-ce-operator/actions/runs/19056948361)
+- **Workflow run**: [#37](https://github.com/alaudadevops/harbor-ce-operator/actions/runs/19252815104)
 
 ## Files synced:
 - docs/
