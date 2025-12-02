@@ -15,6 +15,10 @@ permission:
   roletemplates:
     - docs/shared/roletemplates/*.yaml
 
+internalRoutes: # 可选，支持 glob 匹配，相对于 docs 目录，匹配到的文件在 cli 启用 `-i, --ignore` 选项时会被忽略
+  - '*/development/**/*'
+  - '**/development/**/*'
+
 releaseNotes:
   queryTemplates:
     ## TODO: change the versionMatch for the next releases
