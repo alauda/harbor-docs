@@ -22,7 +22,7 @@ From Harbor 2.6, [Chartmuseum](https://github.com/chartmuseum/chartmuseum) is de
 
 ### Requirements
 
-- docker installed on your local machine.
+- `podman` installed on your local machine.
 - [Helm in version 3.8+](https://helm.sh/docs/intro/install/).
 
 ### Migrate Chart Data
@@ -36,8 +36,8 @@ export HARBOR_USER=<harbor username>
 export HARBOR_PASSWORD=<harbor password>
 # if harbor is http, add -plain-http
 # if harbor is self-signed https, add -insecure
-# more params run `docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --help`
-docker run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --url $HARBOR_URL --username $HARBOR_USER --password $HARBOR_PASSWORD
+# more params run `podman run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --help`
+podman run -ti --rm alaudadockerhub/chartmuseum2oci:v1.1.0-g41baf1e --url $HARBOR_URL --username $HARBOR_USER --password $HARBOR_PASSWORD
 ```
 
 expected output:
@@ -353,7 +353,7 @@ helmValues:
 
 2. Verify Harbor service is accessible:
     * Access Harbor Web UI, verify existing projects and images are visible
-    * Test Docker login
+    * Test Podman login
 
 3. Test pushing and pulling images/charts.
     * Test pushing and pulling images
