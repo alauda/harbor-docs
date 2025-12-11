@@ -60,13 +60,13 @@ According to community recommendations and practices, a non-high-availability Ha
 - Additionally, Harbor supports object storage. For configuration instructions, see [Using Object Storage as the Registry Storage Backend](#storage-yaml-snippets).
 
 ::: warning Do not use NFS as the storage backend
-It is **not recommended** to use NFS as the storage backend for Harbor in **production** or **high-load scenarios** (such as large-scale image push/pull operations or high-concurrency image workloads). Due to inherent protocol characteristics, NFS cannot fully meet Harbor Registry’s metadata-intensive operation requirements. Under heavy load, this often results in artifact upload failures, and you may see errors such as:
+It is **not recommended** to use NFS as the storage backend for Harbor in **production** or **high-load scenarios** (such as large-scale image push/pull operations or high-concurrency image workloads). Due to inherent protocol characteristics, NFS cannot fully meet Harbor Registry's metadata-intensive operation requirements. Under heavy load, this often results in artifact upload failures, and you may see errors such as:
 
 - digest invalid: provided digest did not match uploaded content  
 - blob upload unknown  
 - blob upload invalid  
 
-If you still want to use NFS as Harbor’s storage backend in a **testing environment**, enabling `sync` and `no_wdelay` on the NFS server (consult your storage provider for configuration details) and setting the Registry component’s replica count to **1** can help mitigate the above issues.
+If you still want to use NFS as Harbor's storage backend in a **testing environment**, enabling `sync` and `no_wdelay` on the NFS server (consult your storage provider for configuration details) and setting the Registry component's replica count to **1** can help mitigate the above issues.
 :::
 
 **Network**
