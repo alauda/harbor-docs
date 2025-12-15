@@ -6,6 +6,15 @@ weight: 200
 
 This document describes the subscription of Harbor Operator and the functionality based on Harbor instance deployment.
 
+::: danger Namespace Security Policy Restrictions
+
+Harbor **does not support** deployment in namespaces with SPA (Security Policy Admission) policy set to `Restricted` due to the following reasons:
+
+1. **Init Container Requires Root Privileges**: Harbor uses init containers to initialize PVC directory permissions, which requires root privileges that are not allowed under the Restricted policy.
+
+**Recommendation**: Create a dedicated namespace for the Harbor deployment and ensure that its security policy is **not** set to `Restricted`. When deploying Harbor with `hostPath` storage, the namespace security policy **must be configured as `Privileged`**.
+:::
+
 ## Prerequisites
 
 - This document applies to Harbor 2.12 and above versions provided by the platform. It is decoupled from the platform based on technologies such as Operator.
@@ -728,10 +737,3 @@ Related community issues:
 
 - https://github.com/distribution/distribution/pull/3489
 - https://github.com/containers/buildah/discussions/4928
-
-### Pod Security Policy \{#pod-security-policy}
-
-When deploying Harbor in a namespace with Pod Security Policy (PSP) configured, the deployment support is as follows:
-
-- StorageClass and PVC: Deployment is supported with enforce level set to either `privileged` or `baseline`.
-- Local node storage: Deployment is only supported with enforce level set to `privileged`.
