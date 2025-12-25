@@ -17,7 +17,7 @@ Harbor **does not support** deployment in namespaces with SPA (Security Policy A
 
 ## Prerequisites
 
-- This document applies to Harbor 2.12 and above versions provided by the platform. It is decoupled from the platform based on technologies such as Operator.
+- This document applies to Harbor 2.14 and above versions provided by the platform. It is decoupled from the platform based on technologies such as Operator.
 
 - Please ensure that Harbor Operator has been deployed (subscribed) in the target cluster, meaning the Harbor Operator is ready to create instances.
 
@@ -106,7 +106,7 @@ It is recommended to use block storage (e.g., TopoLVM) to achieve higher IOPS an
 It is recommended to use block storage (e.g., TopoLVM) to achieve higher IOPS and lower latency.
 :::
 
-- The current PostgreSQL component version that Harbor depends on is v14. It is recommended to use the PostgreSQL Operator provided by the platform to deploy PostgreSQL instances, and then complete PostgreSQL integration by configuring access credentials.
+- For supported PostgreSQL versions, please refer to the [version compatibility matrix](./02_harbor_credential.mdx#pg-requirements). It is recommended to deploy PostgreSQL instances using the platform-provided PostgreSQL Operator, and to integrate PostgreSQL by configuring the appropriate access credentials.
 
    - PostgreSQL access is accomplished by configuring a `secret` resource with specific format content. See [Configure Redis, PostgreSQL, and Account Access Credentials](./02_harbor_credential) for details.
 
@@ -628,7 +628,7 @@ spec:
 
 You can change the authentication mode from database to OIDC only if no local users have been added to the database. If there is at least one user other than admin in the Harbor database, you cannot change the authentication mode.
 
-details refer: [Configure OIDC Provider Authentication](https://goharbor.io/docs/2.12.0/administration/configure-authentication/oidc-auth/)
+details refer: [Configure OIDC Provider Authentication](https://goharbor.io/docs/2.14.0/administration/configure-authentication/oidc-auth/)
 
 :::
 

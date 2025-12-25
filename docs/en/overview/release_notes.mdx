@@ -6,7 +6,13 @@ weight: 40
 # Release Notes
 
 ::: tip
-The maintenance period for version **v2.12.z**  is from April 8, 2025 to April 8, 2026.
+The **v2.14.z**  is not released yet.
+:::
+
+{/*
+
+::: tip
+The maintenance period for version **v2.14.z**  is from January 15, 2026 to January 15, 2027.
 :::
 
 ## Compatibility and support matrix
@@ -15,104 +21,22 @@ The following table shows the compatibility and support matrix between the Alaud
 
 | Alauda Build of Harbor Operator Version | Harbor Version | ACP Version      |
 |-----------------------------------------|----------------|------------------|
-| v2.12.13                                | v2.12.4        | v4.0, v4.1, v4.2 |
-| v2.12.12                                | v2.12.4        | v4.0, v4.1       |
-| v2.12.11                                | v2.12.4        | v4.0, v4.1       |
-| v2.12.10                                | v2.12.3        | v4.0             |
-| v2.12.4                                 | v2.12.0        | v4.0             |
+| v2.14.0                                 | v2.14.1        | v4.0, v4.1, v4.2 |
 
-## v2.12.13
-
-### Features and Enhancements
-
-#### Object Storage Template
-
-Introduced a Harbor Object Storage deployment template that wires registry storage to S3-compatible buckets and keeps job logs in PostgreSQL.
-
-### Fixed Issues
-
-{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.12.13 */}
-
-### Known Issues
-
-{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.12.13 */}
-
-## v2.12.12
-
-### Features and Enhancements
-
-#### Fix Security Vulnerabilities
-
-With this release, several security vulnerabilities have been fixed.
-
-### Fixed Issues
-
-{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.12.12 */}
-
-### Known Issues
-
-{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.12.12 */}
-
-## v2.12.11
-
-### Features and Enhancements
-
-#### Harbor v2.12.4 Upgrade
-
-With this release, the underlying Harbor version has been upgraded to v2.12.4, bringing enhanced stability and bug fixes. For more details, please refer to the [Harbor v2.12.4 Release Notes](https://github.com/goharbor/harbor/releases/tag/v2.12.4).
-
-### Fixed Issues
-
-{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.12.11 */}
-
-### Known Issues
-
-{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.12.11 */}
-
-## v2.12.10
-
-### Features and Enhancements
-
-#### Harbor v2.12.3 Upgrade
-
-With this release, the underlying Harbor version has been upgraded to v2.12.3, bringing enhanced stability and bug fixes. For more details, please refer to the [Harbor v2.12.3 Release Notes](https://github.com/goharbor/harbor/releases/tag/v2.12.3).
-
-#### Template Capability Enhancements
-
-With this release, the built-in `Quick Start` and `High-Availability` deployment templates now support Redis Sentinel mode. For configuration details, please refer to [Redis Credentials](../install/02_harbor_credential.md).
-
-#### Pod Security Policy Guidance
-
-With this release, documentation has been added to clarify the impact of pod security policies on Harbor deployment. For more details, please refer to [Pod Security Policy](../install/03_harbor_deploy.mdx).
-
-### Fixed Issues
-
-{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.12.10 */}
-
-### Known Issues
-
-{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.12.10 */}
-
-## v2.12.4
+## v2.14.0
 
 ### Features and Enhancements
 
 #### Alauda Build of Harbor
 
-Includes Alauda Build of Harbor Operator that deploys Harbor Community Edition.
+The Alauda Build of Harbor operator now integrates the community edition of Harbor version 2.14.
+By this update, this operator enables users to leverage the latest features and improvements from the Harbor community,
+supporting efficient software development workflows.
 
-Includes deployment using the following templates:
-
-- Quick Start: A template for quickly creating a Harbor instance, suitable for development and testing scenarios, not recommended for production environments.
-- Production: A template for creating a production-ready Harbor instance, recommended for production environments.
-
-To know more about Harbor v2.12 features, please visit [Harbor v2.12 Release Notes](https://github.com/goharbor/harbor/releases/tag/v2.12.0).
-
+To know more about Harbor v2.14 features, please visit [Harbor v2.14 Release Notes](https://github.com/goharbor/harbor/releases/tag/v2.14.0).
 
 ### Fixed Issues
 
-{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.12.4 */}
-
 ### Known Issues
 
-{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.12.4 */}
+*/}

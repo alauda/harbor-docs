@@ -10,15 +10,16 @@ Upgrading Harbor is a relatively straightforward process, but the complexity can
 - If you're upgrading to a major version.
 - If possible, you should test out the upgrade in a test environment before updating your production instance.Your test environment should mimic your production environment as closely as possible.
 
-You can read the [official upgrade documentation](https://goharbor.io/docs/2.12.0/administration/upgrade/) for more information.
+You can read the [official upgrade documentation](https://goharbor.io/docs/2.14.0/administration/upgrade/) for more information.
 
 ## Upgrade Path
 
 The table below contains the complete upgrade path. When upgrading, you need to upgrade the Operator and Harbor instance versions in sequence.
 
-| No  | Alauda Build of Harbor Operator Version |
-| --- | ---------------- |
-| 1   | 2.12.z           |
+| No | Alauda Build of Harbor Operator Version | Requirements                                                                                |
+|----|-----------------------------------------|---------------------------------------------------------------------------------------------|
+| 1  | 2.12.z                                  |                                                                                             |
+| 2  | 2.14.z                                  | [**PostgreSQL 15 or 16** (upgrade required)](../install/02_harbor_credential.mdx#pg-requirements) |
 
 :::info
 In the version numbers above, the `.z` indicates the latest available patch version for that minor release.
@@ -35,9 +36,10 @@ If your Harbor version is lower than `2.12.0`, please refer to the [Harbor Data 
 :::warning
 To safely upgrade your Harbor version to a new version, please note the following:
 
-1. Before upgrading the Harbor instance, please complete the data backup of the instance.
-2. Upgrading Harbor takes some time, depending on the Harbor data size and the version gap between the current version and target version (number of upgrades)
-3. The instance will be unavailable during the upgrade process.
+1. **PostgreSQL Version Check**: [Ensure your PostgreSQL version meets the requirements for your target Harbor version](../install/02_harbor_credential.mdx#pg-requirements)
+2. Before upgrading the Harbor instance, please complete the data backup of the instance.
+3. Upgrading Harbor takes some time, depending on the Harbor data size and the version gap between the current version and target version (number of upgrades)
+4. The instance will be unavailable during the upgrade process.
 :::
 
 When upgrading, you need to upgrade the <ExternalSiteLink name="acp" href="extend/operator.html#upgrading-operators" children="Operator" /> version and instance version in sequence according to the upgrade path. Upgrading the Operator will not automatically upgrade the instance version, and the upgraded Operator will not manage old Harbor instances, so you need to manually trigger the instance upgrade in time.

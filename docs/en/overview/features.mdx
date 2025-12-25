@@ -16,49 +16,29 @@ weight: 20
   Customizable YAML deployment method to fully control the configuration of the Harbor instance using Helm values.
 
 
-## Harbor v2.12 features
+## Harbor v2.14 features
 
-- Container Registry
+- Enhanced Proxy-cache
 
-  Secure storage and distribution of OCI, Helm, and other container images with role-based access control.
+Syncs state with the upstream registry by deleting local cache when artifacts are removed; Serves the local manifest if its digest matches the upstream registry
 
-- Enhanced Robot Accounts
+- Single Active Replication
 
-  Improved robot account functionality with additional configuration options for better integration and security management in CI/CD processes.
+Adds an option to enforce single active replication, preventing parallel runs under the same policy.
 
-- Speed Limit for Proxy Cache
+- Enhanced artifact scanning
 
-  Control network bandwidth when pulling artifacts from proxy cache projects to optimize resource usage.
+Adds support for fixVersion in CVE reports; Skips vulnerability checks for non-scannable artifacts.
 
-- Enhanced LDAP Onboarding
+- Enhanced garbage collection
 
-  Improved LDAP onboarding process for better user login performance and smoother authentication experience.
+Displays GC progress while running
 
-- Multi-Registry Integration
+- Enhanced CNAI Model integration
 
-  Seamless replication of images to and from various registries including ACR & ACR EE, enhancing interoperability.
+Adds support for raw CNAI model format.
 
-- Vulnerability Scanning
-
-  Built-in vulnerability scanning for container images with support for multiple scanners.
-
-- Artifact Management
-
-  Comprehensive artifact management with tagging, signing, and retention policies.
-
-- Prometheus Metrics
-
-  Export Harbor statistics as Prometheus metrics for monitoring and observability.
-
-- Project-Level Quotas
-
-  Set storage quotas at the project level to control resource usage.
-
-- RBAC Security
-
-  Fine-grained Role-Based Access Control for users and resources.
-
-For more details about Harbor v2.12 features, please visit [Harbor v2.12 Documentation](https://goharbor.io/docs/2.12.0).
+For more details about Harbor v2.14 features, please visit [Harbor v2.14 Documentation](https://goharbor.io/docs/2.14.0).
 
 ## Enhanced features
 
