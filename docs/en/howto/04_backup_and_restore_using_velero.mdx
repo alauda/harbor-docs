@@ -10,6 +10,10 @@ This guide demonstrates how to use [Velero](https://velero.io/), an open-source 
 
 This solution is applicable to HARBOR instances running **version 2.12 or later**.
 
+Harbor data comprises three primary components: storage backend, PostgreSQL database.
+This solution provides backup support for storage backend only.
+The PostgreSQL database requires separate backup procedures according to your database service provider's backup strategy.
+
 :::danger
 
 This solution does not support HARBOR instances deployed using HostPath storage.
