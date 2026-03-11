@@ -6,13 +6,22 @@ weight: 200
 
 This document describes the subscription of Harbor Operator and the functionality based on Harbor instance deployment.
 
-::: danger Namespace Security Policy Restrictions
+::: danger Pod Security Admission Level Restrictions
 
-Harbor **does not support** deployment in namespaces with SPA (Security Policy Admission) policy set to `Restricted` due to the following reasons:
+The Pod Security Admission (PSA) Level requirements for Harbor deployment depend on the storage method used:
 
-1. **Init Container Requires Root Privileges**: Harbor uses init containers to initialize PVC directory permissions, which requires root privileges that are not allowed under the Restricted policy.
+1. **HostPath Storage**: The PSA Level **must be configured as `Privileged`**, because `hostPath` volumes are not allowed under the `Restricted` policy.
 
-**Recommendation**: Create a dedicated namespace for the Harbor deployment and ensure that its security policy is **not** set to `Restricted`. When deploying Harbor with `hostPath` storage, the namespace security policy **must be configured as `Privileged`**.
+2. **PVC or StorageClass Storage**: Harbor **can be deployed** under the `Restricted` PSA level.
+
+PSA levels supported by each deployment template:
+
+| Deployment Template | Supported PSA Levels |
+| --- | --- |
+| Harbor Quick Start Template | Privileged |
+| Harbor High Availability Template | Privileged, Baseline, Restricted |
+| Harbor Object Storage Template | Privileged, Baseline, Restricted |
+
 :::
 
 ## Prerequisites
