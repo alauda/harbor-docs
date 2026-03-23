@@ -106,6 +106,7 @@ It is recommended to use block storage (e.g., TopoLVM) to achieve higher IOPS an
 - The current Redis component version that Harbor depends on is v6. It is recommended to use the Redis Operator provided by the platform to deploy Redis instances, and then complete Redis integration by configuring access credentials.
 
    - Redis access is accomplished by configuring a `secret` resource with specific format content. See [Configure Redis, PostgreSQL, and Account Access Credentials](./02_harbor_credential) for details.
+   - Harbor supports connecting to TLS-enabled external Redis. For a configuration example, see [TLS-enabled Redis Example](#redis-tls-example).
 
 - **Known Issue**: [Modify Harbor Project Permissions Prompt Internal Server Error](../trouble_shooting/01_modify_project_permissions_error.mdx)
 
@@ -403,6 +404,40 @@ spec:
         existingSecretKey: password
       type: external
 ```
+
+##### TLS-enabled Redis Example \{#redis-tls-example}
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-ca-bundle
+type: Opaque
+stringData:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    <redis server root ca>
+    -----END CERTIFICATE-----
+---
+spec:
+  helmValues:
+    caBundleSecretName: redis-ca-bundle
+    redis:
+      external:
+        addr: "<redis access address>:<redis tls port>"
+        existingSecret: <secret storing redis password>
+        existingSecretKey: password
+        tlsOptions:
+          enable: true
+      type: external
+```
+
+Notes for TLS-enabled Redis:
+
+- `caBundleSecretName` is a global Harbor Helm value. The referenced Secret must contain a key named `ca.crt`.
+- For Redis Sentinel with TLS enabled, keep using the Sentinel addresses in `redis.external.addr`, set `redis.external.sentinelMasterSet`, and enable `redis.external.tlsOptions.enable: true`.
+- Harbor only supports server certificate verification for Redis TLS. Client certificates are not supported.
+- Connecting Harbor to Alauda Cache Service for Redis OSS over TLS is not currently supported.
 
 #### PostgreSQL Access Credential Configuration \{#configure-postgresql-credentials}
 
