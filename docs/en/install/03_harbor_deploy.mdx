@@ -174,7 +174,7 @@ Deploy a Harbor instance based on object storage.
 - Compute resources: 8 CPU cores, 16 Gi memory
 - Storage: Image files use object storage, and background task logs use database storage
 - Network access: Use Ingress to access the service, and specify the domain name
-- Dependencies: Configure existing Redis and PostgreSQL access credentials, and separately configure the access credentials for another independent database in the PG instance for the Gitaly component
+- Dependencies: Configure existing Redis and PostgreSQL access credentials
 - Other settings: Configure account credentials, SSO feature is disabled by default
 
 In this template the Trivy scanner does not persist data; it mounts an `emptyDir`, so every pod restart downloads the vulnerability database again and temporarily blocks new scans until the sync finishes.
