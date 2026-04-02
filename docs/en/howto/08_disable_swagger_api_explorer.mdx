@@ -1,0 +1,75 @@
+# Disable Swagger API Explorer
+
+This guide explains how to disable Swagger specification exposure in Harbor Portal for high-security environments.
+This is commonly required when security scanning tools or compliance baselines flag Swagger/OpenAPI exposure as a risk.
+When disabled, `/swagger.json` and `/swagger.yaml` return `404`, but this does not remove the API Explorer entry in the Harbor UI.
+
+## Prerequisites
+
+- A running Harbor instance managed by Harbor CE Operator
+- Permissions to update the Harbor custom resource in the target namespace
+- Access to the Harbor domain for post-change verification
+
+## Overview
+
+**Key Configuration in Harbor Instance**
+
+- **Helm Value**: `spec.helmValues.portal.swagger.enabled`
+
+**Process Overview**
+
+| Step | Operation | Description |
+|------|-----------|-------------|
+| 1 | Update Harbor Helm Values | Set `portal.swagger.enabled` to `false` in Harbor instance `spec.helmValues` |
+| 2 | Apply Configuration | Apply the Harbor CR change and wait for Portal rollout |
+| 3 | Verify Effective Scope | Confirm Swagger spec endpoints return `404` and validate expected non-impact |
+
+## Configuration Steps
+
+### Step 1: Update Harbor Helm Values
+
+Update your Harbor instance configuration:
+
+```yaml
+spec:
+  helmValues:
+    portal:
+      swagger:
+        enabled: false
+```
+
+### Step 2: Apply Configuration
+
+Apply the Harbor custom resource update in your cluster.
+After applying, wait for the Harbor Portal component to finish rolling out.
+
+### Step 3: Verify Effective Scope
+
+Check Swagger specification endpoints:
+
+```bash
+curl -I https://<harbor-domain>/swagger.json
+curl -I https://<harbor-domain>/swagger.yaml
+```
+
+Expected result: both requests return `404 Not Found`.
+
+## Summary
+
+By setting `spec.helmValues.portal.swagger.enabled=false`, you can block Swagger specification exposure from Harbor Portal while keeping Harbor API services available for normal integrations.
+
+## FAQ
+
+### Does this setting disable Harbor APIs?
+
+No. It only affects Swagger specification exposure in Portal (`/swagger.json` and `/swagger.yaml`).
+Harbor business APIs such as `/api/v2.0/**` remain available.
+
+### Why is the API Explorer menu still visible after disabling Swagger?
+
+The setting does not remove the UI entry or route.
+It only makes the Swagger specification endpoints return `404`, so the explorer page cannot load API specs.
+
+### Does this setting work in ingress mode?
+
+Yes. The setting is applied in the Portal component and is effective regardless of exposure mode (`ingress`, `nodePort`, `clusterIP`, `loadBalancer`, or `route`).
