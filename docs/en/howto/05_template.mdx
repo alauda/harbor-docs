@@ -11,7 +11,7 @@ The custom template process is as follows:
 1. Configure the template: According to the explanation in the [Configure Template](#config_template) section, configure the content of the template as needed
 2. Register and verify the template: According to the explanation in the [Register and Verify the Template](#register_template) section, register the template in the target cluster and verify the template content
 
-## Configure Template \{#config_template\}
+## Configure Template \{#config_template}
 
 ### Template Structure
 
@@ -242,7 +242,7 @@ spec:
       type: external
 ```
 
-### Configure Internationalization \{#internationalization\}
+### Configure Internationalization \{#internationalization}
 
 The template supports internationalization configuration. When displayed on the UI, the corresponding name and description will be displayed according to the language selected by the user.
 
@@ -269,7 +269,7 @@ metadata:
 ```
 
 
-### Configure Dynamic Form \{#dynamic_form\}
+### Configure Dynamic Form \{#dynamic_form}
 
 #### Control Types
 
@@ -414,7 +414,7 @@ x-descriptors:
   - urn:alm:descriptor:expression:props.options:value:path:metadata.name
 ```
 
-## Register and Verify the Template \{#register_template\}
+## Register and Verify the Template \{#register_template}
 
 - Register the custom template:
    - Create the template resource (`ConfigMap`) in the `cpaas-system` namespace of the target cluster to complete the registration.
