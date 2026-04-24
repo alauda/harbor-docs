@@ -1,0 +1,83 @@
+# Image Pull Fails with `unexpected end of JSON input`
+
+## Problem Description
+
+When pulling images from a Harbor instance exposed through HTTP-only Ingress, container runtimes fail with errors such as:
+
+```
+error parsing HTTP 404 response body: unexpected end of JSON input: ""
+```
+
+Pipelines that consume the same Harbor may surface a variant of the same root cause:
+
+```
+Error parsing manifest for image: invalid character '<' looking for beginning of value
+```
+
+The problem is **reproducible from a Kubernetes cluster using containerd / CRI-O / Podman** as the container runtime, even though:
+
+- The Harbor address is reachable.
+- Credentials are correct and `login` succeeds.
+- The Harbor UI is fully functional in the browser.
+
+## Root Cause
+
+The issue appears when **all** of the following conditions hold:
+
+1. Harbor is exposed through **Ingress with HTTP only** (no TLS configured on the Ingress).
+2. The cluster's LB (load balancer) listens on **both port 80 and port 443**, and the 443 listener has a valid default certificate.
+3. The client pulling the image is a container runtime that follows the common "HTTPS first, fall back to HTTP" convention (containerd, CRI-O, Podman).
+
+Under these conditions:
+
+- The runtime tries HTTPS first because no explicit scheme or port is pinned in the image reference.
+- The LB accepts the TLS handshake because a default certificate is available on port 443.
+- But the Ingress has **no HTTPS routing rule for the Harbor host**, so the LB returns `404` for the HTTPS request.
+- Because the TLS handshake succeeded, the runtime **does not fall back to HTTP**. It treats the `404` as a final response and fails to parse it as a registry reply, producing `unexpected end of JSON input`.
+
+## Troubleshooting
+
+### Step 1 - Check the LB listener configuration
+
+Confirm that the LB exposing Harbor listens on **both 80 and 443** and that 443 has a working default certificate. If port 443 is not listening, or the handshake fails (no default certificate), this issue does not apply and you should look elsewhere.
+
+### Step 2 - Reproduce with an explicit scheme
+
+From a node that exhibits the failure, pull the image over HTTP with the port pinned. If this succeeds while the default (scheme-less) pull fails, the diagnosis is confirmed:
+
+```bash
+# Fails — runtime speaks HTTPS, gets 404 from the LB
+crictl pull --creds <USER>:<PASS> <HARBOR_HOST>/<PROJECT>/<IMAGE>:<TAG>
+
+# Succeeds — port forces HTTP
+crictl pull --creds <USER>:<PASS> <HARBOR_HOST>:80/<PROJECT>/<IMAGE>:<TAG>
+```
+
+### Step 3 - Inspect the runtime's debug log
+
+On the affected node, enable debug logging on the container runtime and look for messages indicating the runtime skipped the HTTP endpoint after a successful TLS handshake, for example:
+
+```
+Skipping non-TLS endpoint http://<HARBOR_HOST> for host/port that appears to use TLS
+```
+
+Seeing this message (or the runtime switching to HTTPS after a successful TLS handshake) confirms the root cause.
+
+## Solution
+
+### Workaround - Pin the HTTP port in the Harbor access address
+
+Pinning an explicit HTTP port in the Harbor access address forces clients to use HTTP and bypasses the problem. Use `http://<HARBOR_HOST>:80` anywhere the Harbor address is configured, so that every image reference resolves to `<HARBOR_HOST>:80/<PROJECT>/<IMAGE>:<TAG>`.
+
+In some cases the client must be restarted for the new address to take effect — for example, workloads that have already failed to pull must be restarted so they retry with the port-pinned address.
+
+### Long-term fix - Expose Harbor over HTTPS
+
+For production environments, the recommended fix is to expose Harbor over HTTPS. See [Configuring HTTPS](../install/03_harbor_deploy.mdx#configure-https) for the full procedure.
+
+Once HTTPS is properly configured on the Ingress, the LB's `404` on 443 is no longer returned and the runtime reaches Harbor correctly without any port pinning. Remove the port pin from the integration address after HTTPS is working.
+
+## Notes
+
+- **Same root cause, different error.** Pipelines that pull manifests may report `invalid character '<' looking for beginning of value` instead of `unexpected end of JSON input`. Both originate from the same HTML/empty `404` response.
+- **Why not fix it in the runtime?** The "HTTPS first, no fall-back after successful handshake" behavior is the documented convention for most container runtimes and is not something Harbor or this operator can change.

@@ -1,0 +1,69 @@
+# Push Image Fails with 500 or Unauthorized Due to Clock Skew
+
+## Problem Description
+
+In a Harbor deployment with multiple replicas (for example, Harbor Core has 2 or more Pods), users may experience one of the following symptoms even though credentials are correct:
+
+- `docker push` fails with `unauthorized: unauthorized to access repository`.
+- Harbor UI returns `500 Internal Server Error` when browsing tags.
+- Pulling image lists from the container platform fails intermittently.
+
+The symptoms are often **intermittent** — retrying the same operation may succeed, because load balancers route requests to different Core Pods.
+
+## Root Cause
+
+Harbor components authenticate internal calls with time-bound tokens (JWT). When the nodes hosting different Harbor component Pods (typically `harbor-core` and `harbor-registry`) do not have their system clocks in sync, tokens issued by one component are rejected by another as `not valid yet` or `expired`.
+
+A clock drift as small as **a few seconds** is enough to break token validation.
+
+Upstream references:
+
+- https://github.com/goharbor/harbor/issues/15911
+
+## Troubleshooting
+
+Check the logs of the Harbor Core Deployment. The following errors indicate a clock-skew problem:
+
+```
+2023-10-12T07:10:59Z [ERROR] [/pkg/token/token.go:66]: parse token error, token is not valid yet
+2023-10-12T07:10:59Z [WARNING] [/server/middleware/security/v2_token.go:48][requestID="0968ba9698aa27dc3e07fce7fcd62b9a"]: failed to decode bearer token: token is not valid yet
+```
+
+You can verify the hypothesis by scaling Harbor Core down to a single replica. If the issue disappears with a single Pod, it confirms that the problem is clock skew between Pods (not another authentication issue).
+
+```bash
+kubectl -n <NAMESPACE> scale deployment <RELEASE>-harbor-core --replicas=1
+```
+
+To inspect the clock on each node hosting Harbor component Pods:
+
+```bash
+# List which node each Harbor Pod is scheduled on
+kubectl -n <NAMESPACE> get pods -l app=harbor -o wide
+
+# On each listed node, check the current time
+date -u
+```
+
+Any drift larger than **2 seconds** between these nodes must be corrected.
+
+## Solution
+
+Synchronize the system clocks of all cluster nodes using NTP (or `chrony`). After the clocks converge, the token validation errors stop and push/pull operations succeed consistently.
+
+General requirements:
+
+- All nodes hosting Harbor Pods must have their clocks synchronized.
+- The drift between any two nodes should be **less than 2 seconds**.
+- Use a reliable NTP source that is reachable from every node.
+
+After the clocks are synchronized, restore the original Harbor Core replica count if you changed it during troubleshooting:
+
+```bash
+kubectl -n <NAMESPACE> scale deployment <RELEASE>-harbor-core --replicas=<ORIGINAL_REPLICAS>
+```
+
+## Notes
+
+- This class of issues is not specific to Harbor Core. Any Harbor component split across nodes with skewed clocks can exhibit similar token-validation failures.
+- Restarting Harbor Pods is **not** a workaround — the tokens will keep being rejected as long as the underlying clocks stay out of sync.
