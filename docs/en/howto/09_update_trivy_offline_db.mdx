@@ -58,11 +58,27 @@ spec:
           tag: <TAG>
 ```
 
+If the offline database init container runs out of memory while extracting `trivy-offline.db.tgz`, you can raise the init-only resources without increasing the steady-state resources of the main Trivy container:
+
+```yaml
+spec:
+  helmValues:
+    trivy:
+      offlineDBInitResources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1
+          memory: 2Gi
+```
+
 Field reference:
 
 | Field | Purpose |
 | ----- | ------- |
 | `trivy.offlineScan` | Enables the init container that extracts the offline database into Trivy's cache directory. |
+| `trivy.offlineDBInitResources` | Optional resource requests and limits for the `init-offline-db` init container. Use this when offline DB extraction needs more memory than the main Trivy container requires at runtime. |
 | `trivy.skipUpdate` | Prevents Trivy from attempting to refresh the main database from the internet. Recommended in fully air-gapped environments. |
 | `trivy.skipJavaDBUpdate` | Prevents Trivy from refreshing its Java database from the internet. Recommended in fully air-gapped environments. |
 | `global.images.trivyOfflineDB.repository` / `.tag` | Identifies the image built in Step 1. The full image is resolved against your configured image registry prefix. |
