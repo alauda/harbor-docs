@@ -771,6 +771,22 @@ trivy:
   skipJavaDBUpdate: true
 ```
 
+If you keep the offline database workflow enabled and the `init-offline-db` init container hits OOM while extracting the database, you can increase the init-only resources separately from the main Trivy runtime resources:
+
+```yaml
+trivy:
+  offlineScan: true
+  offlineDBInitResources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 2Gi
+```
+
+This setting only affects the init container during Pod initialization and does not increase the steady-state resource limits of the main Trivy container.
+
 ## Additional Information
 
 ### Deploying Harbor in IPv6 Environment
