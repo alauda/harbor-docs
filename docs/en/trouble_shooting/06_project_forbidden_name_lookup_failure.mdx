@@ -1,0 +1,100 @@
+# Project Page Shows "Forbidden" Due to Name Lookup Failure
+
+## Problem Description
+
+Some Harbor projects display `forbidden` error on the web UI when accessing repositories or other project details. The API returns 403:
+
+```json
+{"errors":[{"code":"FORBIDDEN","message":"forbidden"}]}
+```
+
+Other projects work normally. The issue may appear after Harbor upgrade.
+
+## Root Cause
+
+The project name stored in the database `project` table has been corrupted (e.g. invisible characters or encoding issues). When Harbor queries the project by name via ORM:
+
+```sql
+SELECT * FROM project WHERE name = '<project_name>' AND deleted = false;
+```
+
+The equality check fails and returns no rows, even though the row exists and can be found by `project_id`. Since the project lookup fails, the permission check returns false, and the API responds with 403 Forbidden instead of the actual data.
+
+Related upstream issue: https://github.com/goharbor/harbor/issues/15620
+
+## Troubleshooting
+
+### Step 1: Check Harbor Core Logs
+
+Look for the following error pattern in harbor-core logs:
+
+```
+[ERROR] [/server/v2.0/handler/base.go:87]: failed to get project <project_name>: project <project_name> not found
+```
+
+The full log chain typically looks like:
+
+```
+[DEBUG] get project <project_name> from cache error: key not found:redis: nil, will query from database.
+[ERROR] [/server/v2.0/handler/base.go:87]: failed to get project <project_name>: project <project_name> not found
+[DEBUG] {"errors":[{"code":"FORBIDDEN","message":"forbidden"}]}
+```
+
+### Step 2: Verify in Database
+
+Connect to the Harbor database (registry):
+
+```bash
+kubectl exec -it <harbor-database-pod> -n <namespace> -- psql -d registry
+```
+
+Run the following queries:
+
+```sql
+-- Query by project_id — should return the row
+SELECT project_id, name, deleted FROM project WHERE project_id = <id>;
+
+-- Query by name — returns 0 rows if the issue exists
+SELECT project_id, name, deleted FROM project WHERE name = '<project_name>';
+```
+
+If the first query returns the project but the second returns 0 rows, the issue is confirmed.
+
+## Solution
+
+In the Harbor database (registry), rewrite the name field using project_id:
+
+```sql
+-- Fix the corrupted name
+UPDATE project SET name = '<project_name>' WHERE project_id = <id>;
+
+-- Rebuild indexes to ensure consistency (see risk notes below)
+REINDEX TABLE project;
+```
+
+Verify the fix:
+
+```sql
+SELECT project_id FROM project WHERE name = '<project_name>' AND deleted = false;
+-- Should return 1 row
+```
+
+Refresh the Harbor web UI to confirm the 403 error is resolved.
+
+## REINDEX Risk Notes
+
+`REINDEX TABLE project` rebuilds all indexes on the project table. It is a non-destructive operation (does not modify any data rows), but there are some risks to be aware of:
+
+| Item | Impact |
+|------|--------|
+| **Write lock** | During reindex, the table acquires an `ACCESS EXCLUSIVE` lock, which **blocks all reads and writes** (SELECT/INSERT/UPDATE/DELETE) on the table until the operation completes. |
+| **Duration** | For small tables (e.g. tens of rows), it completes in milliseconds. For large tables, the lock duration increases accordingly. |
+| **Connection impact** | If other Harbor components (core, jobservice, etc.) attempt to query the project table during reindex, those requests will be queued and may appear as brief hangs or timeouts. |
+| **Failure safety** | If reindex is interrupted (e.g. pod restart, connection drop), PostgreSQL automatically rolls back. The original indexes remain intact and usable — no data loss or corruption will occur. |
+| **Disk space** | Reindex temporarily requires additional disk space to build new indexes before dropping old ones. Ensure the database volume has sufficient free space. |
+
+**Recommendations:**
+
+- For production environments, execute during a **low-traffic maintenance window** to minimize the impact of the write lock.
+- For the `project` table specifically, the data volume is typically very small (tens to hundreds of rows), so the lock duration is negligible.
+- If zero-downtime is required, PostgreSQL 12+ supports `REINDEX TABLE CONCURRENTLY project`, which builds the new index without holding an exclusive lock. However, this takes longer and requires more disk space.
