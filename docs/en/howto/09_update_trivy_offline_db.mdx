@@ -1,0 +1,94 @@
+---
+weight: 140
+---
+
+# Update the Trivy Vulnerability Database in Offline Environments
+
+This guide explains how to keep Harbor's Trivy scanner up to date in air-gapped environments by building and publishing your own offline vulnerability database image.
+
+By default, Trivy downloads its vulnerability database from the internet. In an offline environment, this is not possible, and scan results become stale or unavailable. Harbor supports loading the database from a pre-built image instead — this guide shows how to build that image and point Harbor at it.
+
+## Prerequisites
+
+- A running Harbor instance managed by this operator.
+- A machine with internet access to build the database image.
+- A private container registry reachable from the Harbor cluster, with credentials to push images.
+- Access to edit the Harbor CR (`harbors.operator.alaudadevops.io`).
+
+## Step 1 - Build the offline database image
+
+On a machine with internet access, create a `Dockerfile` with the following content. Replace `<TRIVY_VERSION>` with the latest Trivy release available at build time.
+
+```
+FROM jitesoft/trivy:<TRIVY_VERSION> AS source
+WORKDIR /opt/trivy
+RUN TRIVY_TEMP_DIR=$(mktemp -d) && \
+    trivy --cache-dir $TRIVY_TEMP_DIR image --download-db-only && \
+    tar -czf ./trivy-offline.db.tgz -C $TRIVY_TEMP_DIR/db metadata.json trivy.db
+
+FROM alpine:3.17
+COPY --from=source /opt/trivy/ /
+RUN apk add --no-cache jq
+```
+
+Build and push the image to your private registry:
+
+```bash
+podman build -t <PRIVATE_REGISTRY>/<PROJECT>/trivy-offline-db:<TAG> .
+podman push <PRIVATE_REGISTRY>/<PROJECT>/trivy-offline-db:<TAG>
+```
+
+The resulting image must contain `/trivy-offline.db.tgz` at its root — Harbor's init container expects that exact path.
+
+## Step 2 - Enable offline scanning on the Harbor CR
+
+Edit the Harbor CR and set `trivy.offlineScan` to `true`, then point `global.images.trivyOfflineDB` at the image built in Step 1:
+
+```yaml
+spec:
+  helmValues:
+    trivy:
+      offlineScan: true
+      skipUpdate: true
+      skipJavaDBUpdate: true
+    global:
+      images:
+        trivyOfflineDB:
+          repository: <PROJECT>/trivy-offline-db
+          tag: <TAG>
+```
+
+Field reference:
+
+| Field | Purpose |
+| ----- | ------- |
+| `trivy.offlineScan` | Enables the init container that extracts the offline database into Trivy's cache directory. |
+| `trivy.skipUpdate` | Prevents Trivy from attempting to refresh the main database from the internet. Recommended in fully air-gapped environments. |
+| `trivy.skipJavaDBUpdate` | Prevents Trivy from refreshing its Java database from the internet. Recommended in fully air-gapped environments. |
+| `global.images.trivyOfflineDB.repository` / `.tag` | Identifies the image built in Step 1. The full image is resolved against your configured image registry prefix. |
+
+Apply the change and wait for the Trivy Pod to roll out.
+
+## Step 3 - Verify the database is loaded
+
+Confirm that the init container ran successfully and that Trivy picked up the new database:
+
+```bash
+# The init container should have completed successfully
+kubectl -n <NAMESPACE> describe pod <RELEASE>-harbor-trivy-0 | grep -A5 init-offline-db
+
+# The database metadata inside the Trivy Pod should reflect a recent build timestamp
+kubectl -n <NAMESPACE> exec -it <RELEASE>-harbor-trivy-0 -- \
+  cat /home/scanner/.cache/trivy/db/metadata.json
+```
+
+Trigger a scan on any image in the Harbor UI and confirm that vulnerabilities are reported as expected.
+
+## Keeping the database fresh
+
+Because the vulnerability database changes frequently, rebuild and push a new image on a regular cadence so scan results do not drift. A scheduled CI job that runs the build from Step 1 and bumps the `tag` on the Harbor CR is a good fit.
+
+## Notes
+
+- **ARM / multi-arch.** If your cluster runs on a non-amd64 architecture, build the `trivyOfflineDB` image as multi-arch, or build it for the architecture of the nodes running the Trivy Pod.
+- **Image pull.** Ensure the Harbor cluster can pull from your private registry. If authentication is required, configure an image pull secret on the Harbor namespace.
