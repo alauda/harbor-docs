@@ -1,10 +1,10 @@
 # Documentation Sync Information
 
-- **Last synced**: 2026-07-13 15:17:16 UTC
+- **Last synced**: 2026-07-15 06:48:06 UTC
 - **Source repository**: alaudadevops/harbor-ce-operator
-- **Source commit**: [ae5fba86b1e436d5976c0be8f4ffff7820472f44](https://github.com/alaudadevops/harbor-ce-operator/commit/ae5fba86b1e436d5976c0be8f4ffff7820472f44)
-- **Triggered by**: kycheng
-- **Workflow run**: [#95](https://github.com/alaudadevops/harbor-ce-operator/actions/runs/29261579896)
+- **Source commit**: [8ef7736b87fdada291af479c222d954f8476d58a](https://github.com/alaudadevops/harbor-ce-operator/commit/8ef7736b87fdada291af479c222d954f8476d58a)
+- **Triggered by**: chengjingtao
+- **Workflow run**: [#96](https://github.com/alaudadevops/harbor-ce-operator/actions/runs/29395267151)
 
 ## Files synced:
 - docs/
