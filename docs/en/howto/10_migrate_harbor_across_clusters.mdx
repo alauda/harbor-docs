@@ -1,0 +1,381 @@
+---
+weight: 65
+---
+
+# Migrating HARBOR to a New Database and Existing PVC Storage
+
+When a HARBOR instance deployed with StorageClass-provisioned filesystem PVCs must move to another namespace or cluster — for example during an operating-system replacement or a cluster rebuild — you do **not** need a backup/restore tool to copy its stateless workloads. HARBOR's `core` / `registry` / `jobservice` / `portal` / `trivy` workloads are **stateless**. The durable state required to preserve projects and images lives in two external places:
+
+- **PostgreSQL** — all metadata (projects, repositories, tag→blob references, users, robot accounts, replication rules, quotas).
+- **Registry filesystem PVC** — the image blobs.
+
+Jobservice logs and Trivy data are auxiliary persistent data; migrate their PVCs as well when they must be preserved. Redis holds cache and job-queue data and is recreated fresh on the target.
+
+So the migration is: quiesce the source HARBOR, migrate PostgreSQL and the HARBOR PVC data by their own means, prepare the target namespace Secrets, then **redeploy HARBOR with the same HARBOR name, pointing at the migrated database and the already-existing PVCs**.
+
+:::info
+
+
+If you want the backup tool itself to copy the volume data, use to [Backup and Restore Using Velero](./04_backup_and_restore_using_velero.mdx) instead.
+
+:::
+
+## Terminology
+
+| Term               | Description                                                                 |
+|--------------------|-----------------------------------------------------------------------------|
+| Source Instance    | The HARBOR instance before migration                                        |
+| Target Instance    | The HARBOR instance after migration                                         |
+| Source Namespace   | The namespace where the source instance is located                          |
+| Target Namespace   | The namespace where the target instance is located                          |
+| HARBOR CR Resource | The custom resource describing the deployment configuration of HARBOR       |
+
+## Prerequisites
+
+1. **Install kubectl**: see the [Kubernetes official documentation](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/).
+2. **A plan to migrate PostgreSQL**: HARBOR's database must be migrated to (or made reachable from) the target, at the **same major version**. If it is managed by the PostgreSQL Operator, the cross-cluster hot-standby procedure keeps downtime to the switchover only.
+3. **A plan for the HARBOR PVCs**: the registry PVC must be migrated or pre-created in the target namespace; jobservice and Trivy PVCs should also be migrated if their data must be preserved.
+4. **Secret input values**: the source `secretKey`, the source admin-password Secret reference, and the target PostgreSQL / Redis connection and authentication values or generated Secrets. You will prepare the target namespace Secrets in [Step 3](#step-3).
+
+Set the following for convenience:
+
+```bash
+export SRC_NS=<source namespace>
+export SRC_HARBOR=<source HARBOR name>
+export TGT_NS=<target namespace>
+export SRC_CONTEXT=<source cluster kubeconfig context>
+export TGT_CONTEXT=<target cluster kubeconfig context>
+```
+
+Before running the commands below, make sure the source and target cluster contexts point to the correct kubeconfig entries. All `kubectl` commands that talk to a cluster in this guide use `--context` so the source cluster and the target cluster are never mixed up. The local manifest patching command in Step 4.4 does not contact a cluster, so it does not need `--context`.
+
+## Migration Overview
+
+1. **Quiesce the Source Instance**: enable `Repository Read Only`, then scale the source HARBOR workloads to `0`.
+2. **Migrate PostgreSQL and the HARBOR PVC Storage**: migrate PostgreSQL and make the HARBOR PVCs available in the target namespace.
+3. **Prepare the Target Secrets**: carry over the HARBOR Secrets and migrate the PostgreSQL and Redis credential Secrets to the target namespace.
+4. **Deploy HARBOR on the Target**: use the same HARBOR name with the migrated database, migrated PVCs, target Redis, and prepared Secrets.
+5. **Verify and Disable Read-Only Mode**: verify login, projects, images, robot accounts, and image pulls, then disable read-only mode.
+
+## Step 1: Quiesce the Source Instance \{#step-1}
+
+Log in to the source HARBOR, go to `Administration` -> `Configuration` -> `System Settings` -> `Repository Read Only` and enable it. Pushes and deletions are now rejected, so no new blob is written and the database stops changing — this is the consistency point for the PostgreSQL migration.
+
+After read-only mode is enabled, record the current component replica counts; you will restore them in Step 4.4. Then stop the source HARBOR workloads by setting all component replicas to `0` on the source HARBOR CR:
+
+```bash
+export SRC_NS=<source namespace>
+export SRC_HARBOR=<source HARBOR name>
+export TGT_NS=<target namespace>
+export SRC_CONTEXT=<source cluster kubeconfig context>
+export TGT_CONTEXT=<target cluster kubeconfig context>
+
+kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" patch harbor "${SRC_HARBOR}" --type=merge -p '{
+  "spec": {
+    "helmValues": {
+      "core":       { "replicas": 0 },
+      "portal":     { "replicas": 0 },
+      "jobservice": { "replicas": 0 },
+      "registry":   { "replicas": 0 },
+      "trivy":      { "replicas": 0 }
+    }
+  }
+}'
+
+kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" wait --for=delete pod \
+  -l app=harbor,release="${SRC_HARBOR}" \
+  --timeout=10m
+```
+
+This shuts down the stateless HARBOR application layer while leaving PostgreSQL and the HARBOR PVC storage available for migration. Do not continue until all source HARBOR application pods are gone. Do not scale down or delete the source PostgreSQL or HARBOR PVC storage until the target has been verified and you no longer need the source as a rollback point.
+
+## Step 2: Migrate PostgreSQL and the HARBOR PVC Storage
+
+**PostgreSQL** — migrate the database to the target by following the PostgreSQL migration documentation in Alauda Container Platoform Knownledge Base. Search for `Migrate PostgreSQL` in KB and follow the document that matches your PostgreSQL deployment mode.
+
+**HARBOR PVC storage** — contact your storage provider and migrate the HARBOR PVC data according to the provider's storage migration procedure. The migrated PVCs must already exist in the target namespace before you create the target HARBOR CR. This includes the registry PVC, and should also include the jobservice log PVC and Trivy PVC when those PVCs exist on the source instance. Record the target PVC names and metadata. In [Step 4](#step-4), either retain the source StorageClass configuration when the migrated PVCs meet the generated-name, specification, and Helm ownership requirements, or reference the migrated PVCs explicitly with `existingClaim`.
+
+## Step 3: Prepare the Target Secrets \{#step-3}
+
+Prepare all Secrets that the target HARBOR CR will reference before creating the target instance. Complete this step in the following order:
+
+1. Carry over the source HARBOR `secretKey`.
+2. Migrate the admin-password Secret referenced by `existingSecretAdminPassword`.
+3. Migrate the PostgreSQL credential Secret and update it for the migrated database.
+4. Migrate or recreate the Redis credential Secret for the target Redis instance.
+5. Verify that all four Secrets exist in the target HARBOR namespace.
+
+### 3.1 Carry Over the HARBOR `secretKey`
+
+Read the source `secretKey`:
+
+```bash
+kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" get secret "${SRC_HARBOR}-core" -o jsonpath='{.data.secretKey}' | base64 -d; echo
+```
+
+Record this 16-character value and create the target Secret that will pin it on the target HARBOR instance:
+
+```bash
+# Recommended: put the source secretKey into a Secret (the key name must be "secretKey")
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" create secret generic harbor-secret-key \
+  --from-literal=secretKey='<SOURCE-SECRETKEY>'
+```
+
+
+The chart mounts the `secretKey` value from this Secret into the HARBOR Core component. There is no separate field for configuring the key name, so a different data key will not work.
+
+### 3.2 Migrate the Admin-Password Secret
+
+Back up the source CR's admin-password Secret reference and copy that Secret to the target namespace. The target CR inherits `existingSecretAdminPassword` and `existingSecretAdminPasswordKey` from the source CR, so the referenced Secret must exist in the target namespace before you apply the target CR:
+
+```bash
+ADMIN_PASSWORD_SECRET="$(kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" get harbor "${SRC_HARBOR}" -o jsonpath='{.spec.helmValues.existingSecretAdminPassword}')"
+ADMIN_PASSWORD_SECRET_KEY="$(kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" get harbor "${SRC_HARBOR}" -o jsonpath='{.spec.helmValues.existingSecretAdminPasswordKey}')"
+
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" create secret generic "${ADMIN_PASSWORD_SECRET}" \
+  --from-literal="${ADMIN_PASSWORD_SECRET_KEY}=$(kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" get secret "${ADMIN_PASSWORD_SECRET}" -o go-template="{{ index .data \"${ADMIN_PASSWORD_SECRET_KEY}\" }}" | base64 -d)" \
+  --dry-run=client -o yaml | kubectl --context "${TGT_CONTEXT}" apply -f -
+```
+
+Verify the copied admin-password Secret data and update it if the target reference should use a different actual value.
+
+### 3.3 Migrate the PostgreSQL Credential Secret \{#step-3-postgresql-secret}
+
+Migrate the PostgreSQL credential Secret referenced by the source HARBOR instance to the target HARBOR namespace as a starting copy. If the target PostgreSQL deployment generated a new credential Secret, copy that Secret to the target HARBOR namespace instead.
+
+After migration, update the Secret data only when the PostgreSQL connection information has changed for the target environment. If the database endpoint, credentials, and authentication settings remain the same, keep the existing values unchanged.
+
+For the required connection fields, credential format, and version requirements, see [PostgreSQL Credentials](../install/02_harbor_credential.mdx#pg-credentials).
+
+Record the migrated PostgreSQL Secret name. You will reference it from `harbor-target.yaml` in [Step 4](#step-4).
+
+### 3.4 Migrate the Redis Credential Secret \{#step-3-redis-secret}
+
+Redis is recreated on the target. Migrate the source Redis credential Secret only as a starting copy, or use the credential Secret generated by the target Redis deployment.
+
+Update the Secret data only when the Redis connection information has changed for the target environment. If the Redis endpoint, credentials, and authentication settings remain the same, keep the existing values unchanged. For the required connection fields, credential format, and deployment requirements, see [Redis Credentials](../install/02_harbor_credential.mdx#redis-credentials).
+
+Record the target Redis Secret name. You will reference it from `harbor-target.yaml` in [Step 4](#step-4).
+
+Migrating the PostgreSQL and Redis credential Secrets does not update the connection addresses stored in the HARBOR CR. You must update both the Secret references and the connection information in [Step 4.2](#step-4-database-and-redis).
+
+### 3.5 Verify the Target Secrets
+
+Before continuing, confirm all four target Secrets exist:
+
+```bash
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" get secret \
+  harbor-secret-key \
+  "${ADMIN_PASSWORD_SECRET}" \
+  <postgresql credential Secret> \
+  <redis credential Secret>
+```
+
+## Step 4: Deploy HARBOR on the Target \{#step-4}
+
+Create the target's remaining supporting resources, using either a new Redis instance or the migrated Redis instance if you are reusing an existing one, then create the HARBOR CR. The `secretKey`, admin-password, PostgreSQL credential, and Redis credential Secrets should already exist in the target namespace from [Step 3](#step-3).
+
+The target HARBOR instance is created from the source CR and then adjusted for the target environment. Complete the migration in this order:
+
+1. Export the source HARBOR manifest and clean it for the target instance.
+2. Configure target-side PostgreSQL and Redis connection settings in the manifest.
+3. Select and configure the target HARBOR PVC method.
+4. Restore the target workload replica counts.
+5. Review the generated manifest and apply it.
+
+### 4.1 Generate the Target Manifest
+
+Create the target HARBOR CR the same way you would create a normal HARBOR instance, but start from the source CR so the HARBOR version, resources, exposure settings, `externalURL`, `existingSecretAdminPassword`, `existingSecretAdminPasswordKey`, and other unchanged runtime settings are retained.
+
+Export the source HARBOR CR:
+
+```bash
+kubectl --context "${SRC_CONTEXT}" -n "${SRC_NS}" get harbor "${SRC_HARBOR}" -o yaml > harbor-target.yaml
+```
+
+Use `yq` v4 to prepare it as a new target object:
+
+```bash
+export TGT_NS=<target namespace>
+
+yq eval -i '
+  .metadata.namespace = strenv(TGT_NS) |
+  del(
+    .metadata.uid,
+    .metadata.resourceVersion,
+    .metadata.generation,
+    .metadata.creationTimestamp,
+    .metadata.managedFields,
+    .metadata.ownerReferences,
+    .metadata.finalizers,
+    .metadata.selfLink,
+    .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration",
+    .status
+  )
+' harbor-target.yaml
+```
+
+If `yq` is not available, make the same changes manually: keep `metadata.name` unchanged, set the target `metadata.namespace`, add or keep the PostgreSQL version-check annotation, and remove source runtime metadata and `status`.
+
+Continue editing `harbor-target.yaml` with the target-only values. Handle PostgreSQL / Redis and Harbor PVCs separately: PostgreSQL and Redis come from the target environment, while the migrated Harbor PVC names usually come from the source HARBOR instance name.
+
+
+
+### 4.2 Configure PostgreSQL and Redis \{#step-4-database-and-redis}
+
+The credential Secrets and the connection settings in the HARBOR CR serve different purposes: the Secrets provide authentication data, while the CR tells HARBOR which PostgreSQL and Redis endpoints to connect to. Migrating the Secrets alone does not redirect HARBOR to the target services. If the PostgreSQL or Redis endpoint information has not changed for the target environment, you can leave the existing connection settings unchanged.
+
+In `harbor-target.yaml`, verify and update the following target values:
+
+- **PostgreSQL address**: `database.external.host` and `database.external.port` must point to the migrated PostgreSQL service and be reachable from the target HARBOR namespace. If the target database name, username, or SSL mode differs, also update `coreDatabase`, `username`, and `sslmode`. See [PostgreSQL Access Credential Configuration](../install/03_harbor_deploy.mdx#configure-postgresql-credentials).
+- **PostgreSQL Secret**: `database.external.existingSecret` and `database.external.existingSecretKey` must reference the PostgreSQL credential Secret and password key prepared in [Step 3.3](#step-3-postgresql-secret). See [PostgreSQL Access Credential Configuration](../install/03_harbor_deploy.mdx#configure-postgresql-credentials).
+- **Redis address**: `redis.external.addr` must point to the target Redis endpoint. For Sentinel mode, include all reachable Sentinel endpoints and set `redis.external.sentinelMasterSet` to the target master set name. See [Redis Access Credential Configuration](../install/03_harbor_deploy.mdx#configure-redis-credentials).
+- **Redis Secret**: `redis.external.existingSecret` and `redis.external.existingSecretKey` must reference the Redis credential Secret and password key prepared in [Step 3.4](#step-3-redis-secret). See [Redis Access Credential Configuration](../install/03_harbor_deploy.mdx#configure-redis-credentials).
+- **TLS settings**: if PostgreSQL or Redis uses TLS, keep or update the corresponding SSL/TLS fields and CA Secret for the target service.
+
+If PostgreSQL or Redis runs in another namespace, use an address that resolves from the target HARBOR namespace, such as the service's fully qualified cluster DNS name. Confirm DNS resolution and TCP connectivity to each endpoint before applying the target HARBOR CR.
+
+Do not restore the target workload replicas yet; keep the `0` values inherited from the stopped source until the migrated PVCs are configured in Step 4.3.
+
+### 4.3 Configure HARBOR PVCs
+
+Use the following command to verify the migrated HARBOR PVC names:
+
+```bash
+export REGISTRY_PVC="${REGISTRY_PVC:-${SRC_HARBOR}-registry}"
+export JOBSERVICE_PVC="${JOBSERVICE_PVC:-${SRC_HARBOR}-jobservice}"
+export TRIVY_PVC="${TRIVY_PVC:-data-${SRC_HARBOR}-trivy-0}"
+
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" get pvc \
+  "${REGISTRY_PVC}" \
+  "${JOBSERVICE_PVC}" \
+  "${TRIVY_PVC}"
+```
+
+If the migrated PVC names differ from the chart-generated names, or you do not want Helm to manage the migrated PVCs, use the following `kubectl patch --local` command to update `harbor-target.yaml`:
+
+```bash
+export HARBOR_SECRET_KEY="${HARBOR_SECRET_KEY:-harbor-secret-key}"
+
+kubectl patch --local -f harbor-target.yaml --type=merge -o yaml -p "$(cat <<EOF
+{
+  "spec": {
+    "helmValues": {
+      "existingSecretSecretKey": "${HARBOR_SECRET_KEY}",
+      "persistence": {
+        "persistentVolumeClaim": {
+          "registry": {
+            "existingClaim": "${REGISTRY_PVC}",
+            "storageClass": null
+          },
+          "jobservice": {
+            "jobLog": {
+              "existingClaim": "${JOBSERVICE_PVC}",
+              "storageClass": null
+            }
+          },
+          "trivy": {
+            "existingClaim": "${TRIVY_PVC}",
+            "storageClass": null
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+)" > harbor-target-updated.yaml
+
+mv harbor-target-updated.yaml harbor-target.yaml
+```
+
+### 4.4 Restore the Target Workload Replicas
+
+Use the following `kubectl patch --local` command to update the target manifest and restore the component replica counts in `harbor-target.yaml`:
+
+```bash
+kubectl patch --local -f harbor-target.yaml --type=merge -o yaml -p '{
+  "spec": {
+    "helmValues": {
+      "core":       { "replicas": 1 },
+      "portal":     { "replicas": 1 },
+      "jobservice": { "replicas": 1 },
+      "registry":   { "replicas": 1 },
+      "trivy":      { "replicas": 1 }
+    }
+  }
+}' > harbor-target-updated.yaml
+
+mv harbor-target-updated.yaml harbor-target.yaml
+```
+
+Replace the example value `1` with the source instance's pre-migration replica count for each component. If a component is disabled, omit it from the merge patch and leave its replica configuration unchanged.
+
+### 4.5 Review and Apply the Manifest
+
+For reference, the generated target manifest should keep the inherited source fields such as resources, `existingSecretAdminPassword`, `existingSecretAdminPasswordKey`, `expose`, `externalURL`, and `global`. The snippet below shows the target-specific dependency and PVC fields with explicit PVC references. The replica configuration is handled separately in Step 4.4 and is not repeated here.
+
+```yaml
+metadata:
+  name: <SRC_HARBOR>
+  namespace: <TGT_NS>
+spec:
+  helmValues:
+    # Other source helmValues are retained.
+    existingSecretAdminPassword: <source admin password Secret copied to target namespace>
+    existingSecretAdminPasswordKey: password
+    existingSecretSecretKey: harbor-secret-key
+    database:
+      type: external
+      external:
+        host: <migrated-pg-service>
+        port: 5432
+        sslmode: require
+        username: postgres
+        password: null
+        existingSecret: <secret storing postgresql password>
+        existingSecretKey: password
+    redis:
+      type: external
+      external:
+        addr: <fresh-redis-service>:6379
+        sentinelMasterSet: mymaster
+        password: null
+        existingSecret: <secret storing redis password>
+        existingSecretKey: password
+    persistence:
+      persistentVolumeClaim:
+        registry:
+          existingClaim: <migrated registry PVC name>
+        jobservice:
+          jobLog:
+            existingClaim: <migrated jobservice log PVC name>
+        trivy:
+          existingClaim: <migrated Trivy PVC name>
+```
+
+Review the exported manifest carefully before applying it:
+
+- Keep the HARBOR version, component resource settings, exposure type, and other unchanged runtime settings from the source unless the target requires a different value.
+- Confirm the HARBOR name remains unchanged, and confirm the target namespace, PostgreSQL endpoint, Redis endpoint, and Secret references.
+- Confirm the selected PVC method: either the inherited StorageClass configuration and required PVC metadata, or the explicit `existingClaim` values.
+- If the external URL or ingress host changed, update those fields too; otherwise they are inherited from the source CR.
+- Pin the source `secretKey` using `existingSecretSecretKey` or `secretKey`.
+- Confirm `core.replicas`, `portal.replicas`, `jobservice.replicas`, `registry.replicas`, and `trivy.replicas` are set to the target's desired replica count.
+
+Then create the target HARBOR CR:
+
+```bash
+kubectl --context "${TGT_CONTEXT}" apply -f harbor-target.yaml
+```
+
+## Step 5: Verify and Disable Read-Only Mode
+
+After all pods are `Running`, verify against the target:
+
+- Admin login succeeds (with the source's admin password).
+- Projects and repositories are all present.
+- Image tags are present and **pullable** (`pull` a sample image, or fetch its manifest + a blob) — this confirms the migrated-database metadata and the reused HARBOR PVC storage line up.
+- **Robot accounts work** and registry authentication is normal — this confirms the `secretKey` was pinned correctly.
+
+Finally, disable read-only mode on the target (`Administration` -> `Configuration` -> `System Settings` -> uncheck `Repository Read Only`) and test a `push`. Keep the source instance quiesced until you have cut over traffic; it is your rollback path until you tear it down.
