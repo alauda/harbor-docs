@@ -33,9 +33,10 @@ If you want the backup tool itself to copy the volume data, use to [Backup and R
 ## Prerequisites
 
 1. **Install kubectl**: see the [Kubernetes official documentation](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/).
-2. **A plan to migrate PostgreSQL**: HARBOR's database must be migrated to (or made reachable from) the target, at the **same major version**. If it is managed by the PostgreSQL Operator, the cross-cluster hot-standby procedure keeps downtime to the switchover only.
-3. **A plan for the HARBOR PVCs**: the registry PVC must be migrated or pre-created in the target namespace; jobservice and Trivy PVCs should also be migrated if their data must be preserved.
-4. **Secret input values**: the source `secretKey`, the source admin-password Secret reference, and the target PostgreSQL / Redis connection and authentication values or generated Secrets. You will prepare the target namespace Secrets in [Step 3](#step-3).
+2. **Install the HARBOR Operator on the target cluster**: follow [Installing Operator](../install/01_installation_guide.mdx) and confirm that the Operator, its CRDs, and its admission webhook are ready before creating the target HARBOR CR.
+3. **A plan to migrate PostgreSQL**: HARBOR's database must be migrated to (or made reachable from) the target, at the **same major version**. If it is managed by the PostgreSQL Operator, the cross-cluster hot-standby procedure keeps downtime to the switchover only.
+4. **A plan for the HARBOR PVCs**: the registry PVC must be migrated or pre-created in the target namespace; jobservice and Trivy PVCs should also be migrated if their data must be preserved.
+5. **Secret input values**: the source `secretKey`, the source admin-password Secret reference, and the target PostgreSQL / Redis connection and authentication values or generated Secrets. You will prepare the target namespace Secrets in [Step 3](#step-3).
 
 Set the following for convenience:
 
@@ -46,6 +47,12 @@ export TGT_NS=<target namespace>
 export SRC_CONTEXT=<source cluster kubeconfig context>
 export TGT_CONTEXT=<target cluster kubeconfig context>
 ```
+
+:::warning
+
+The target HARBOR CR must use the same `metadata.name` as the source HARBOR CR. Restored PVCs, Secrets, and other resources may contain names or Helm ownership metadata derived from the source release name. Using a different name prevents the new instance from matching and reusing that restored data.
+
+:::
 
 Before running the commands below, make sure the source and target cluster contexts point to the correct kubeconfig entries. All `kubectl` commands that talk to a cluster in this guide use `--context` so the source cluster and the target cluster are never mixed up. The local manifest patching command in Step 4.4 does not contact a cluster, so it does not need `--context`.
 
@@ -357,11 +364,32 @@ spec:
 Review the exported manifest carefully before applying it:
 
 - Keep the HARBOR version, component resource settings, exposure type, and other unchanged runtime settings from the source unless the target requires a different value.
-- Confirm the HARBOR name remains unchanged, and confirm the target namespace, PostgreSQL endpoint, Redis endpoint, and Secret references.
+- Confirm `metadata.name` exactly matches the source HARBOR CR name, and confirm the target namespace, PostgreSQL endpoint, Redis endpoint, and Secret references.
 - Confirm the selected PVC method: either the inherited StorageClass configuration and required PVC metadata, or the explicit `existingClaim` values.
 - If the external URL or ingress host changed, update those fields too; otherwise they are inherited from the source CR.
 - Pin the source `secretKey` using `existingSecretSecretKey` or `secretKey`.
 - Confirm `core.replicas`, `portal.replicas`, `jobservice.replicas`, `registry.replicas`, and `trivy.replicas` are set to the target's desired replica count.
+
+If the target namespace was restored from the source cluster, it may also contain Helm release Secrets for the source HARBOR instance. Even when the target has no HARBOR CR or workloads, these stale records reserve the release name and cause the admission webhook to reject the target CR.
+
+Before applying the manifest, confirm that the target does not already contain the HARBOR CR or workloads:
+
+```bash
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" get harbor "${SRC_HARBOR}" \
+  --ignore-not-found
+
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" get deployment,statefulset,pod \
+  -l "release=${SRC_HARBOR}"
+```
+
+If neither command returns a HARBOR resource, delete any same-named Helm release records. The label selector makes this command a no-op when no matching release records exist. Do not use `helm uninstall` for this cleanup because it may delete restored resources, including resources that the target HARBOR instance must reuse.
+
+```bash
+kubectl --context "${TGT_CONTEXT}" -n "${TGT_NS}" delete secret \
+  -l "owner=helm,name=${SRC_HARBOR}"
+```
+
+If a HARBOR CR or HARBOR workload is present, stop and investigate instead of deleting the release records.
 
 Then create the target HARBOR CR:
 
