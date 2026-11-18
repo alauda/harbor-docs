@@ -496,46 +496,46 @@ spec:
           path: /data/harbor/trivy # Trivy component node storage path
     portal:
       resources:
-        request:
+        requests:
           cpu: 100m
           memory: 128Mi
-        limit:
+        limits:
           cpu: 200m
           memory: 256Mi
     nginx:
       resources:
-        request:
+        requests:
           cpu: 100m
           memory: 128Mi
-        limit:
+        limits:
           cpu: 200m
           memory: 256Mi
     core:
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 256Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 512Mi
     registry:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Registry component node selector
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 512Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 1Gi
     jobservice:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Jobservice component node selector
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 256Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 512Mi
     trivy:
@@ -544,10 +544,10 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Trivy component node selector
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 512Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 1Gi
     database:
@@ -602,47 +602,47 @@ spec:
     portal:
       replicas: 2 # Portal component replicas
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 256Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 512Mi
     core:
       replicas: 2 # Core component replicas
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 256Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 512Mi
     registry:
       replicas: 2 # Registry component replicas
       resources:
-        request:
+        requests:
           cpu: 400m
           memory: 1Gi
-        limit:
+        limits:
           cpu: 800m
           memory: 2Gi
     jobservice:
       replicas: 2 # Jobservice component replicas
       resources:
-        request:
+        requests:
           cpu: 200m
           memory: 256Mi
-        limit:
+        limits:
           cpu: 400m
           memory: 512Mi
     trivy:
       skipUpdate: true
       offlineScan: true
       resources:
-        request:
+        requests:
           cpu: 400m
           memory: 1Gi
-        limit:
+        limits:
           cpu: 800m
           memory: 2Gi
     database:
