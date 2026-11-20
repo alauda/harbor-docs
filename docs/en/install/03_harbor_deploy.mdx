@@ -58,7 +58,7 @@ Pre-deployment resource planning refers to decisions that need to be made before
 
 A non-high-availability Harbor instance can run with 2 CPU cores and 4 Gi of memory.
 
-For high availability mode, the following table lists the per-replica resources that the `Harbor High Availability` template sets for each component. Use it as the baseline for capacity planning.
+For high availability mode, the following table lists the per-replica resources that the `Harbor High Availability` template sets for each component; the `Harbor Object Storage` template uses the same values. Use it as the baseline for capacity planning.
 
 | Component | Replicas | Requests (CPU / Memory) | Limits (CPU / Memory) |
 | --- | ---: | --- | --- |
@@ -196,7 +196,7 @@ The `Harbor High Availability (Envoy Gateway)` template stores image files and j
 
 Deploy a Harbor instance based on object storage.
 
-- Compute resources: 8 CPU cores, 16 Gi memory
+- Compute resources: the same as the `Harbor High Availability` template. See [Resources](#pre-deployment-resource-planning) for the per-component values.
 - Storage: Image files use object storage, and background task logs use database storage
 - Network access: Use Ingress to access the service, and specify the domain name
 - Dependencies: Configure existing Redis and PostgreSQL access credentials
@@ -227,6 +227,8 @@ spec:
     jobservice:
       replicas: 2
     registry:
+      replicas: 2
+    trivy:
       replicas: 2
 ```
 
@@ -276,17 +278,16 @@ PVC configuration snippet (PVCs need to be created in advance):
 ```yaml
 spec:
   helmValues:
-    harbor:
-      persistence:
-        enabled: true
-        persistentVolumeClaim:
-          registry:
-            existingClaim: <registry component pvc>
-          jobservice:
-            jobLog:
-              existingClaim: <jobservice component pvc>
-          trivy:
-            existingClaim: <trivy component pvc>
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        registry:
+          existingClaim: <registry component pvc>
+        jobservice:
+          jobLog:
+            existingClaim: <jobservice component pvc>
+        trivy:
+          existingClaim: <trivy component pvc>
 ```
 
 Local node storage configuration snippet:
@@ -323,24 +324,23 @@ Configure Object Storage (S3) as the Registry storage backend:
   ```yaml
   spec:
     helmValues:
-      harbor:
-        persistence:
-          enabled: true
-          imageChartStorage:
-            disableredirect: true
-            s3:
-              existingSecret: <object-storage-secret>
-              bucket: <bucket>
-              region: <region>
-              regionendpoint: <regionendpoint>
-              v4auth: true
-            type: s3
-          persistentVolumeClaim:
-            jobservice:
-              jobLog:
-                existingClaim: <jobservice component pvc>
-            trivy:
-              existingClaim: <trivy component pvc>
+      persistence:
+        enabled: true
+        imageChartStorage:
+          disableredirect: true
+          s3:
+            existingSecret: <object-storage-secret>
+            bucket: <bucket>
+            region: <region>
+            regionendpoint: <regionendpoint>
+            v4auth: true
+          type: s3
+        persistentVolumeClaim:
+          jobservice:
+            jobLog:
+              existingClaim: <jobservice component pvc>
+          trivy:
+            existingClaim: <trivy component pvc>
   ```
 
 | Field                 | Description                                                                                                                                                                        | Example Value                 |
@@ -616,13 +616,14 @@ spec:
     registry:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Registry component node selector
-      resources:
-        requests:
-          cpu: 200m
-          memory: 512Mi
-        limits:
-          cpu: 400m
-          memory: 1Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 400m
+            memory: 1Gi
     jobservice:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Jobservice component node selector
@@ -714,13 +715,22 @@ spec:
           memory: 512Mi
     registry:
       replicas: 2 # Registry component replicas
-      resources:
-        requests:
-          cpu: 400m
-          memory: 1Gi
-        limits:
-          cpu: 800m
-          memory: 2Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 300m
+            memory: 819Mi
+          limits:
+            cpu: 600m
+            memory: 1638Mi
+      controller:
+        resources: # Resources of the registryctl container in the registry Pod
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 410Mi
     jobservice:
       replicas: 2 # Jobservice component replicas
       resources:
@@ -731,6 +741,7 @@ spec:
           cpu: 400m
           memory: 512Mi
     trivy:
+      replicas: 2 # Trivy component replicas
       skipUpdate: true
       offlineScan: true
       resources:
@@ -800,7 +811,7 @@ spec:
       enabled: true
       imageChartStorage:
         type: s3
-        disableredirect: true # See the object storage field description for the effect of this setting
+        disableredirect: true # Layers are served through the Gateway; see the notes below
         s3:
           existingSecret: object-storage-secret # Secret storing the object storage access key and secret key
           bucket: harbor-registry # Bucket name, created in advance
@@ -832,13 +843,22 @@ spec:
           memory: 512Mi
     registry:
       replicas: 2 # Registry component replicas
-      resources:
-        requests:
-          cpu: 300m
-          memory: 819Mi
-        limits:
-          cpu: 600m
-          memory: 1638Mi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 300m
+            memory: 819Mi
+          limits:
+            cpu: 600m
+            memory: 1638Mi
+      controller:
+        resources: # Resources of the registryctl container in the registry Pod
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 410Mi
     jobservice:
       replicas: 2 # Jobservice component replicas
       jobLoggers:
@@ -851,6 +871,7 @@ spec:
           cpu: 400m
           memory: 512Mi
     trivy:
+      replicas: 2 # Trivy component replicas
       skipUpdate: true
       offlineScan: true
       resources:
@@ -883,7 +904,10 @@ Notes:
 
 - The resource values match the [Resources](#pre-deployment-resource-planning) table. Adjust them according to the planning guidance in that section.
 - Because job logs are stored in the database, the example does not configure storage for jobservice. See [Configure Job Log Storage](../howto/07_configure_job_log_storage.mdx#store-job-log-to-db).
-- For the meaning of `disableredirect` and the other object storage fields, see the field description under [Storage (YAML Snippets)](#storage-yaml-snippets).
+- `disableredirect` controls how image layers reach the client:
+  - `true` (the default of the `Harbor Object Storage` template): every image layer is read from object storage by the registry and returned through the Gateway. This works in any network, but the Envoy Gateway carries all pull traffic and must be sized for the expected pull bandwidth.
+  - `false`: Harbor returns a temporary object storage URL for each layer, and the client downloads the layer directly from object storage. The Gateway then mainly carries API requests. Use this only when every client that pulls images, such as CI nodes and the nodes of the clusters that run the images, can reach the `regionendpoint` address (and, for an HTTPS endpoint, trusts its certificate); otherwise layer downloads fail.
+- For the other object storage fields, see the field description under [Storage (YAML Snippets)](#storage-yaml-snippets).
 - If the `Gateway` is in a different namespace from the Harbor instance, configure `allowedRoutes` and a `ReferenceGrant` as described in [Cross-namespace Gateway](../howto/11_expose_with_envoy_gateway.mdx#cross-namespace-gateway).
 - After deployment, verify that the `HTTPRoute` is accepted and that `docker login`, `push`, and `pull` work through the domain name. See [Verify](../howto/11_expose_with_envoy_gateway.mdx#verify).
 
