@@ -222,6 +222,8 @@ spec:
       replicas: 2
     registry:
       replicas: 2
+    trivy:
+      replicas: 2
 ```
 
 #### Storage (YAML Snippets) \{#storage-yaml-snippets}
@@ -270,17 +272,16 @@ PVC configuration snippet (PVCs need to be created in advance):
 ```yaml
 spec:
   helmValues:
-    harbor:
-      persistence:
-        enabled: true
-        persistentVolumeClaim:
-          registry:
-            existingClaim: <registry component pvc>
-          jobservice:
-            jobLog:
-              existingClaim: <jobservice component pvc>
-          trivy:
-            existingClaim: <trivy component pvc>
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        registry:
+          existingClaim: <registry component pvc>
+        jobservice:
+          jobLog:
+            existingClaim: <jobservice component pvc>
+        trivy:
+          existingClaim: <trivy component pvc>
 ```
 
 Local node storage configuration snippet:
@@ -317,24 +318,23 @@ Configure Object Storage (S3) as the Registry storage backend:
   ```yaml
   spec:
     helmValues:
-      harbor:
-        persistence:
-          enabled: true
-          imageChartStorage:
-            disableredirect: true
-            s3:
-              existingSecret: <object-storage-secret>
-              bucket: <bucket>
-              region: <region>
-              regionendpoint: <regionendpoint>
-              v4auth: true
-            type: s3
-          persistentVolumeClaim:
-            jobservice:
-              jobLog:
-                existingClaim: <jobservice component pvc>
-            trivy:
-              existingClaim: <trivy component pvc>
+      persistence:
+        enabled: true
+        imageChartStorage:
+          disableredirect: true
+          s3:
+            existingSecret: <object-storage-secret>
+            bucket: <bucket>
+            region: <region>
+            regionendpoint: <regionendpoint>
+            v4auth: true
+          type: s3
+        persistentVolumeClaim:
+          jobservice:
+            jobLog:
+              existingClaim: <jobservice component pvc>
+          trivy:
+            existingClaim: <trivy component pvc>
   ```
 
 | Field                 | Description                                                                                                                                                                        | Example Value                 |
@@ -540,13 +540,14 @@ spec:
     registry:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Registry component node selector
-      resources:
-        requests:
-          cpu: 200m
-          memory: 512Mi
-        limits:
-          cpu: 400m
-          memory: 1Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 400m
+            memory: 1Gi
     jobservice:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Jobservice component node selector
@@ -638,13 +639,22 @@ spec:
           memory: 512Mi
     registry:
       replicas: 2 # Registry component replicas
-      resources:
-        requests:
-          cpu: 400m
-          memory: 1Gi
-        limits:
-          cpu: 800m
-          memory: 2Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 300m
+            memory: 819Mi
+          limits:
+            cpu: 600m
+            memory: 1638Mi
+      controller:
+        resources: # Resources of the registryctl container in the registry Pod
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 410Mi
     jobservice:
       replicas: 2 # Jobservice component replicas
       resources:
@@ -655,6 +665,7 @@ spec:
           cpu: 400m
           memory: 512Mi
     trivy:
+      replicas: 2 # Trivy component replicas
       skipUpdate: true
       offlineScan: true
       resources:
