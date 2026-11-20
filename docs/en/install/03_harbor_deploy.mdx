@@ -40,7 +40,7 @@ Harbor supports various resource configurations to accommodate different custome
 
 2. A Harbor instance contains multiple components, such as the `Registry component` responsible for managing image files, the `PostgreSQL` component providing storage for application metadata and user information, and the `Redis` component for caching, etc. The platform provides professional PostgreSQL Operator and Redis Operator, so when deploying Harbor instances, Redis and PostgreSQL resources are no longer directly deployed, but accessed through configuring specific access credentials for existing instances.
 
-### Pre-deployment Resource Planning
+### Pre-deployment Resource Planning \{#pre-deployment-resource-planning}
 
 Pre-deployment resource planning refers to decisions that need to be made before deployment and take effect during deployment. The main contents include:
 
@@ -50,13 +50,32 @@ Pre-deployment resource planning refers to decisions that need to be made before
 
    - Each component will use multiple replicas
 
-   - Network access no longer supports `NodePort`, but requires access through domain names configured via `Ingress`
+   - Network access no longer supports `NodePort`, but requires access through a domain name configured via `Ingress` or `Envoy Gateway`
 
-   - Storage methods no longer support `node storage`, but require access through `StorageClass` or `PVC`
+   - Storage methods no longer support `node storage`, but require access through `StorageClass` or `PVC`; the Registry component can also use object storage
 
 **Resources**
 
-According to community recommendations and practices, a non-high-availability Harbor instance can run with a minimum of 2 cores and 4Gi of resources, while in high availability mode, a minimum of 8 cores and 16Gi of resources is required for stable operation.
+A non-high-availability Harbor instance can run with 2 CPU cores and 4 Gi of memory.
+
+For high availability mode, the following table lists the per-replica resources that the `Harbor High Availability` template sets for each component; the `Harbor Object Storage` template uses the same values. Use it as the baseline for capacity planning.
+
+| Component | Replicas | Requests (CPU / Memory) | Limits (CPU / Memory) |
+| --- | ---: | --- | --- |
+| portal | 2 | 200m / 256Mi | 400m / 512Mi |
+| core | 2 | 200m / 256Mi | 400m / 512Mi |
+| registry | 2 | 300m / 819Mi | 600m / 1638Mi |
+| registryctl (runs in the registry Pod) | 2 | 100m / 200Mi | 200m / 410Mi |
+| jobservice | 2 | 200m / 256Mi | 400m / 512Mi |
+| trivy | 2 | 400m / 1Gi | 800m / 2Gi |
+
+In total, the Harbor components request 2.8 CPU cores and about 5.5 Gi of memory, with limits of 5.6 CPU cores and about 11 Gi of memory. These totals do not include PostgreSQL and Redis, which are deployed separately and must be planned according to their own requirements.
+
+Consider the following when planning resources:
+
+- The memory used by the Harbor components does not depend on the number of projects or images; it changes with the number of concurrent requests. As the amount of stored data grows, scale PostgreSQL and the image storage (for example, object storage) instead of the Harbor components.
+- When many CI jobs pull images concurrently, first raise the CPU limit of `core` to 1 core, then raise the CPU limit of `registry`.
+- Do not set the resources of `core`, `registry`, `jobservice`, and `trivy` below the values in the table.
 
 **Storage**
 
@@ -155,7 +174,7 @@ Complete the deployment by filling in the relevant information according to the 
 
 Deploying a high-availability Harbor instance requires higher resource configuration and provides a higher availability standard.
 
-- Computing resources: CPU 16 cores, Memory 16 Gi
+- Computing resources: requests of 2.8 CPU cores and about 5.5 Gi of memory, limits of 5.6 CPU cores and about 11 Gi of memory, excluding PostgreSQL and Redis. See [Resources](#pre-deployment-resource-planning) for the per-component values.
 - Storage method: Uses storage class resources to store image files, background task logs, and image scanning vulnerability database
 - Network access: Uses Ingress method, requires domain name specification
 - Dependent services: Requires configuration of existing Redis and PostgreSQL access credentials
@@ -171,11 +190,13 @@ Complete the deployment by filling in the relevant information according to the 
 
 For environments that expose external traffic via Envoy Gateway (Gateway API), the platform also provides the `Harbor High Availability (Envoy Gateway)` template. It deploys the same high-availability topology and exposes the instance through an `HTTPRoute` attached to a user-created `Gateway`. See [Expose Harbor with Envoy Gateway](../howto/11_expose_with_envoy_gateway.mdx) for configuration instructions.
 
+The `Harbor High Availability (Envoy Gateway)` template stores image files and job logs on a `ReadWriteMany` storage class, and the `Harbor Object Storage` template supports only `Ingress` access. To combine high availability, object storage, and Envoy Gateway access, deploy from YAML; see [Complete YAML Example: High Availability, Object Storage, Envoy Gateway Network Access](#ha-object-storage-envoy-gateway-example).
+
 ### Deploying from the `Harbor Object Storage` Template
 
 Deploy a Harbor instance based on object storage.
 
-- Compute resources: 8 CPU cores, 16 Gi memory
+- Compute resources: the same as the `Harbor High Availability` template. See [Resources](#pre-deployment-resource-planning) for the per-component values.
 - Storage: Image files use object storage, and background task logs use database storage
 - Network access: Use Ingress to access the service, and specify the domain name
 - Dependencies: Configure existing Redis and PostgreSQL access credentials
@@ -190,7 +211,7 @@ Complete the deployment by filling in the relevant information according to the 
 ### Deploying from YAML
 
 
-YAML deployment is the most basic and powerful deployment capability. Here we provide corresponding YAML snippets for each dimension from the `Deployment Planning` section, and then provide two complete YAML examples for complete scenarios to help users understand the YAML configuration method and make configuration changes as needed.
+YAML deployment is the most basic and powerful deployment capability. Here we provide corresponding YAML snippets for each dimension from the `Deployment Planning` section, and then provide three complete YAML examples for complete scenarios to help users understand the YAML configuration method and make configuration changes as needed.
 
 #### High Availability (YAML Snippets)
 
@@ -206,6 +227,8 @@ spec:
     jobservice:
       replicas: 2
     registry:
+      replicas: 2
+    trivy:
       replicas: 2
 ```
 
@@ -255,17 +278,16 @@ PVC configuration snippet (PVCs need to be created in advance):
 ```yaml
 spec:
   helmValues:
-    harbor:
-      persistence:
-        enabled: true
-        persistentVolumeClaim:
-          registry:
-            existingClaim: <registry component pvc>
-          jobservice:
-            jobLog:
-              existingClaim: <jobservice component pvc>
-          trivy:
-            existingClaim: <trivy component pvc>
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        registry:
+          existingClaim: <registry component pvc>
+        jobservice:
+          jobLog:
+            existingClaim: <jobservice component pvc>
+        trivy:
+          existingClaim: <trivy component pvc>
 ```
 
 Local node storage configuration snippet:
@@ -302,24 +324,23 @@ Configure Object Storage (S3) as the Registry storage backend:
   ```yaml
   spec:
     helmValues:
-      harbor:
-        persistence:
-          enabled: true
-          imageChartStorage:
-            disableredirect: true
-            s3:
-              existingSecret: <object-storage-secret>
-              bucket: <bucket>
-              region: <region>
-              regionendpoint: <regionendpoint>
-              v4auth: true
-            type: s3
-          persistentVolumeClaim:
-            jobservice:
-              jobLog:
-                existingClaim: <jobservice component pvc>
-            trivy:
-              existingClaim: <trivy component pvc>
+      persistence:
+        enabled: true
+        imageChartStorage:
+          disableredirect: true
+          s3:
+            existingSecret: <object-storage-secret>
+            bucket: <bucket>
+            region: <region>
+            regionendpoint: <regionendpoint>
+            v4auth: true
+          type: s3
+        persistentVolumeClaim:
+          jobservice:
+            jobLog:
+              existingClaim: <jobservice component pvc>
+          trivy:
+            existingClaim: <trivy component pvc>
   ```
 
 | Field                 | Description                                                                                                                                                                        | Example Value                 |
@@ -595,13 +616,14 @@ spec:
     registry:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Registry component node selector
-      resources:
-        requests:
-          cpu: 200m
-          memory: 512Mi
-        limits:
-          cpu: 400m
-          memory: 1Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 400m
+            memory: 1Gi
     jobservice:
       nodeSelector:
         kubernetes.io/hostname: 192.168.142.11 # Jobservice component node selector
@@ -693,13 +715,22 @@ spec:
           memory: 512Mi
     registry:
       replicas: 2 # Registry component replicas
-      resources:
-        requests:
-          cpu: 400m
-          memory: 1Gi
-        limits:
-          cpu: 800m
-          memory: 2Gi
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 300m
+            memory: 819Mi
+          limits:
+            cpu: 600m
+            memory: 1638Mi
+      controller:
+        resources: # Resources of the registryctl container in the registry Pod
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 410Mi
     jobservice:
       replicas: 2 # Jobservice component replicas
       resources:
@@ -710,6 +741,7 @@ spec:
           cpu: 400m
           memory: 512Mi
     trivy:
+      replicas: 2 # Trivy component replicas
       skipUpdate: true
       offlineScan: true
       resources:
@@ -737,6 +769,147 @@ spec:
       type: external
 
 ```
+
+#### Complete YAML Example: High Availability, Object Storage, Envoy Gateway Network Access \{#ha-object-storage-envoy-gateway-example}
+
+This example deploys a high-availability Harbor instance that stores image layers in object storage (S3), stores job logs in the database, and is exposed through Envoy Gateway (`expose.type: route`). No built-in template covers this combination, so it is deployed from YAML.
+
+Prepare the following resources before deploying the instance:
+
+1. Envoy Gateway is installed, and a `Gateway` with an `HTTPS` listener and its TLS certificate `Secret` has been created. The domain name resolves to the Envoy Gateway external address. See [Envoy Gateway (Gateway API) Access Configuration](#envoy-gateway-network-access) and [Expose Harbor with Envoy Gateway](../howto/11_expose_with_envoy_gateway.mdx).
+2. The object storage bucket has been created, and the [object storage credentials](./02_harbor_credential.mdx#object-storage-credentials) `Secret` has been created. To use Ceph Object Storage on the platform, see <ExternalSiteLink name="acp" href="/storage/storagesystem_ceph/index.html" children="Ceph Distributed Storage" />.
+3. Highly available PostgreSQL and Redis instances are available, and the PostgreSQL, Redis, and admin account credentials `Secret` resources have been created. See [Configure Redis, PostgreSQL, and Account Access Credentials](./02_harbor_credential).
+
+Then create the Harbor instance:
+
+```yaml
+apiVersion: operator.alaudadevops.io/v1alpha1
+kind: Harbor
+metadata:
+  name: harbor-ha
+  namespace: <harbor instance namespace>
+spec:
+  version: 2.14.3
+  helmValues:
+    existingSecretAdminPassword: harbor-password # Secret storing harbor admin account password
+    existingSecretAdminPasswordKey: password # Secret key storing harbor admin account password
+    externalURL: https://harbor.example.com # Harbor access address; TLS is terminated at the Gateway
+    expose:
+      type: route
+      tls:
+        enabled: false # Keep false; TLS is terminated at the Gateway listener
+      route:
+        parentRefs:
+          - name: harbor-gateway # Gateway name
+            namespace: <gateway namespace> # Gateway namespace
+            sectionName: https # Gateway listener name
+            group: gateway.networking.k8s.io
+            kind: Gateway
+        hosts:
+          - harbor.example.com # Harbor domain name
+    persistence:
+      enabled: true
+      imageChartStorage:
+        type: s3
+        disableredirect: true # Layers are served through the Gateway; see the notes below
+        s3:
+          existingSecret: object-storage-secret # Secret storing the object storage access key and secret key
+          bucket: harbor-registry # Bucket name, created in advance
+          region: us-east-1 # Object storage region
+          regionendpoint: http://<object storage address>:<port> # Object storage endpoint
+          v4auth: true
+      persistentVolumeClaim:
+        trivy:
+          storageClass: <storage class> # Optional; if unset, Trivy uses emptyDir
+          accessMode: ReadWriteMany
+          size: 5Gi
+    portal:
+      replicas: 2 # Portal component replicas
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 400m
+          memory: 512Mi
+    core:
+      replicas: 2 # Core component replicas
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 400m
+          memory: 512Mi
+    registry:
+      replicas: 2 # Registry component replicas
+      registry:
+        resources: # Resources of the registry container
+          requests:
+            cpu: 300m
+            memory: 819Mi
+          limits:
+            cpu: 600m
+            memory: 1638Mi
+      controller:
+        resources: # Resources of the registryctl container in the registry Pod
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 410Mi
+    jobservice:
+      replicas: 2 # Jobservice component replicas
+      jobLoggers:
+        - database # Store job logs in the database; no jobservice storage is required
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 400m
+          memory: 512Mi
+    trivy:
+      replicas: 2 # Trivy component replicas
+      skipUpdate: true
+      offlineScan: true
+      resources:
+        requests:
+          cpu: 400m
+          memory: 1Gi
+        limits:
+          cpu: 800m
+          memory: 2Gi
+    database:
+      external:
+        host: harbor-database # Database access address
+        port: 5432 # Database port number
+        sslmode: require # Whether to enable SSL
+        username: harbor # Database username
+        coreDatabase: registry # Database name
+        existingSecret: harbor-database # Secret storing database password
+        existingSecretKey: password # Secret key storing database password
+      type: external
+    redis:
+      external:
+        addr: "<sentinel1 address>:<port>,<sentinel2 address>:<port>,<sentinel3 address>:<port>" # Redis Sentinel addresses
+        sentinelMasterSet: mymaster # Sentinel master set name
+        existingSecret: harbor-redis # Secret storing Redis password
+        existingSecretKey: password # Secret key storing Redis password
+      type: external
+```
+
+Notes:
+
+- The resource values match the [Resources](#pre-deployment-resource-planning) table. Adjust them according to the planning guidance in that section.
+- Because job logs are stored in the database, the example does not configure storage for jobservice. See [Configure Job Log Storage](../howto/07_configure_job_log_storage.mdx#store-job-log-to-db).
+- `disableredirect` controls how image layers reach the client:
+  - `true` (the default of the `Harbor Object Storage` template): every image layer is read from object storage by the registry and returned through the Gateway. This works in any network, but the Envoy Gateway carries all pull traffic and must be sized for the expected pull bandwidth.
+  - `false`: Harbor returns a temporary object storage URL for each layer, and the client downloads the layer directly from object storage. The Gateway then mainly carries API requests. Use this only when every client that pulls images, such as CI nodes and the nodes of the clusters that run the images, can reach the `regionendpoint` address (and, for an HTTPS endpoint, trusts its certificate); otherwise layer downloads fail.
+- For the other object storage fields, see the field description under [Storage (YAML Snippets)](#storage-yaml-snippets).
+- If the `Gateway` is in a different namespace from the Harbor instance, configure `allowedRoutes` and a `ReferenceGrant` as described in [Cross-namespace Gateway](../howto/11_expose_with_envoy_gateway.mdx#cross-namespace-gateway).
+- After deployment, verify that the `HTTPRoute` is accepted and that `docker login`, `push`, and `pull` work through the domain name. See [Verify](../howto/11_expose_with_envoy_gateway.mdx#verify).
 
 ## Subsequent Operations \{#subsequent-operations}
 
