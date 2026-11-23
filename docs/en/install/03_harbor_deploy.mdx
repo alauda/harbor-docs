@@ -71,7 +71,7 @@ For high availability mode, the following table lists the per-replica resources 
 
 In total, the Harbor components request 2.8 CPU cores and about 5.5 Gi of memory, with limits of 5.6 CPU cores and about 11 Gi of memory. These totals do not include PostgreSQL and Redis, which are deployed separately and must be planned according to their own requirements.
 
-Consider the following when planning resources:
+Consider the following when planning resources. These points follow from the architecture of the components and have not been verified by load tests:
 
 - The memory used by the Harbor components does not depend on the number of projects or images; it changes with the number of concurrent requests. As the amount of stored data grows, scale PostgreSQL and the image storage (for example, object storage) instead of the Harbor components.
 - When many CI jobs pull images concurrently, first raise the CPU limit of `core` to 1 core, then raise the CPU limit of `registry`.
@@ -268,7 +268,7 @@ spec:
             size: 1Gi
         trivy:
           storageClass: ceph
-          accessMode: ReadWriteMany
+          accessMode: ReadWriteOnce # Each Trivy replica has its own PVC
           size: 5Gi
 
 ```
@@ -693,7 +693,7 @@ spec:
             size: 1Gi # Jobservice component storage size
         trivy:
           storageClass: ceph # Trivy component storage class
-          accessMode: ReadWriteMany
+          accessMode: ReadWriteOnce # Each Trivy replica has its own PVC
           size: 5Gi # Trivy component storage size
     portal:
       replicas: 2 # Portal component replicas
@@ -820,8 +820,8 @@ spec:
           v4auth: true
       persistentVolumeClaim:
         trivy:
-          storageClass: <storage class> # Optional; if unset, Trivy uses emptyDir
-          accessMode: ReadWriteMany
+          storageClass: <storage class> # Optional; if unset, the default storage class is used
+          accessMode: ReadWriteOnce # Each Trivy replica has its own PVC
           size: 5Gi
     portal:
       replicas: 2 # Portal component replicas
