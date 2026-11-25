@@ -16,7 +16,7 @@ You can read the [official upgrade documentation](https://goharbor.io/docs/2.14.
 
 The table below contains the complete upgrade path. When upgrading, you need to upgrade the Operator and Harbor instance versions in sequence.
 
-| No | Alauda Build of Harbor Operator Version | Requirements                                                                                |
+| No | Alauda Toolchain Enterprise Registry E1 Operator Version | Requirements                                                                                |
 |----|-----------------------------------------|---------------------------------------------------------------------------------------------|
 | 1  | 2.12.z                                  |                                                                                             |
 | 2  | 2.14.z                                  | [**PostgreSQL 15 or 16** (upgrade required)](../install/02_harbor_credential.mdx#pg-requirements) |
@@ -48,8 +48,14 @@ When upgrading, you need to upgrade the <ExternalSiteLink name="acp" href="exten
 
 ### Upgrading Instances via UI
 
-Go to the `Administrator` -> `Marketplace` -> `Operator Hub` page, switch to the target cluster and enter the `Alauda Build of Harbor` Operator details page, click on the instance name you want to upgrade to enter the instance details page, and click the upgrade button on the instance details page.
+Go to the `Administrator` -> `Marketplace` -> `Operator Hub` page, switch to the target cluster and enter the `Alauda Toolchain Enterprise Registry E1` Operator details page, click on the instance name you want to upgrade to enter the instance details page, and click the upgrade button on the instance details page.
 
 ### Upgrading Instances via YAML
 
 Go to the `Administrator` -> `Clusters` -> `Resources` page, switch to the target cluster and search for the `Harbor` resource type, edit the instance resource you want to upgrade, modify the `spec.version` field to the desired instance version, and save it.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

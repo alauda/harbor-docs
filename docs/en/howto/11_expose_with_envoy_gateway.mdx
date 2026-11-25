@@ -1,6 +1,6 @@
 ---
 title: "Expose Harbor with Envoy Gateway"
-description: "How to expose a Harbor instance through Envoy Gateway (Gateway API) using the HTTPRoute mode, including Gateway creation, TLS configuration, and verification."
+description: "How to expose a Harbor instance through Envoy Gateway (Gateway API) using the HTTPRoute mode, including Gateway creation, TLS configuration, verification, and rollback."
 weight: 135
 ---
 
@@ -34,7 +34,7 @@ Harbor ClusterIP Services (harbor-core, harbor-portal)
 - TLS is terminated at the **Gateway listener**, not by Harbor's Nginx.
 - The Harbor Registry API (`/v2/`) is routed to `harbor-core`, so `docker login` / `push` / `pull` work through the Gateway.
 
-## Prerequisites
+## Prerequisites \{#prerequisites}
 
 1. Envoy Gateway is installed on the cluster.
    - On Alauda Container Platform 4.3+, install it through the platform's <ExternalSiteLink name="acp" href="/networking/operators/envoy_gateway_operator.html" children="Envoy Gateway Operator" />. Creating the default `EnvoyGatewayCtl` instance (`cpaas-default` in the `envoy-gateway-operator` namespace) automatically generates the `GatewayClass` `envoy-gateway-operator-cpaas-default`.
@@ -78,15 +78,15 @@ Notes:
 
 ## Step 2: Deploy Harbor \{#deploy-harbor}
 
-### Option A: Use the `Harbor High Availability (Envoy Gateway)` Template
+### Option A: Use the `High Availability` Template
 
-Select the `Harbor High Availability (Envoy Gateway)` template from the Harbor deployment wizard and fill in:
+Select the `High Availability` template from the Harbor deployment wizard, set `Network Access` to `Gateway API`, and fill in:
 
 | Field | Value |
 | --- | --- |
 | Domain Name | Harbor domain, e.g. `harbor.example.com` |
-| Gateway Name | The `Gateway` resource name, e.g. `harbor-gateway` |
-| Gateway Namespace | Leave empty when the Gateway is in the same namespace as the Harbor instance; otherwise fill in the Gateway's namespace |
+| Gateway Name | The `Gateway` resource name in the Harbor instance namespace, e.g. `harbor-gateway` |
+| Gateway Listener Name | The listener the `HTTPRoute` attaches to. Defaults to `https`; use `http` when the Gateway only has an HTTP listener |
 
 ### Option B: Deploy from YAML
 
@@ -234,3 +234,92 @@ This is a generic Envoy Gateway capability; see the Envoy Gateway documentation 
 
 - [Customize EnvoyProxy](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/) — operational guide
 - [EnvoyProxy API reference](https://gateway.envoyproxy.io/docs/api/extension_types/#envoyproxy) — `envoyService.type` (valid options: `ClusterIP`, `LoadBalancer`, `NodePort`)
+
+## Use a non-default port or a shared Gateway \{#non-default-port-shared-gateway}
+
+### Include the port in `externalURL`
+
+`externalURL` must be the address that clients actually use. When the `Gateway` is reached on a port other than 443, for example through the `NodePort` set up above, include the port:
+
+```yaml
+spec:
+  helmValues:
+    externalURL: https://harbor.example.com:31838
+```
+
+The `HTTPRoute` hostname stays `harbor.example.com`; the port is not part of the host match. Without the port in `externalURL`, the `Www-Authenticate` realm returned by `/v2/` points to `https://harbor.example.com/service/token`, which is not reachable, and `docker login` fails. After changing `externalURL`, the Harbor core, jobservice and registry Pods restart.
+
+### Serve the Gateway on port 443 of a fixed node
+
+To use the standard port without a LoadBalancer, pin the Envoy proxy Pod to one node and publish the listener on that node with `hostPort`. The node must not already use port 443 (do not choose a node that runs the platform ALB). In the `EnvoyProxy` referenced by the `Gateway`:
+
+```yaml
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        pod:
+          nodeSelector:
+            kubernetes.io/hostname: <node name>
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: envoy
+                      ports:
+                        - containerPort: 10443 # Envoy listens on the listener port + 10000 for ports below 1024
+                          hostPort: 443
+                          protocol: TCP
+```
+
+Then point the domain name to that node (DNS record, or an `/etc/hosts` entry for tests) and set `externalURL: https://<domain name>` without a port. The proxy is reachable only while that node is up.
+
+### Share one Gateway between instances
+
+One `Gateway` can serve several instances, and several products, with a different domain name for each. In the `Gateway`, allow routes from other namespaces and, if the listener terminates TLS, use a certificate that covers all the domain names (for example a wildcard certificate):
+
+```yaml
+listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      mode: Terminate
+      certificateRefs:
+        - kind: Secret
+          name: <wildcard certificate secret>
+    allowedRoutes:
+      namespaces:
+        from: All
+```
+
+In each Harbor instance, reference the shared `Gateway` with its namespace and use that instance's own domain name. The Gateway Name field in the console form only lists `Gateways` in the instance namespace, so an instance that uses a shared `Gateway` from another namespace must be deployed from YAML:
+
+```yaml
+spec:
+  helmValues:
+    expose:
+      type: route
+      route:
+        hosts:
+          - harbor.example.com
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: <shared gateway name>
+            namespace: <shared gateway namespace>
+            sectionName: https
+    externalURL: https://harbor.example.com
+```
+
+`from: All` lets every namespace attach routes. To limit it, use `from: Selector` as described in [Cross-namespace Gateway](#cross-namespace-gateway).
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

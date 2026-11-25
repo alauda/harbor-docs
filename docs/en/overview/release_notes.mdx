@@ -11,15 +11,48 @@ The maintenance period for version **v2.14.z**  is from January 13, 2026 to Janu
 
 ## Compatibility and support matrix
 
-The following table shows the compatibility and support matrix between the Alauda Build of Harbor operator and ACP versions.
+The following table shows the compatibility and support matrix between the Alauda Toolchain Enterprise Registry E1 operator and ACP versions.
 
-| Alauda Build of Harbor Operator Version | Harbor Version | ACP Version |
+| Alauda Toolchain Enterprise Registry E1 Operator Version | Harbor Version | ACP Version |
 |-----------------------------------------|----------------|-------------|
+| v2.14.6                                 | v2.14.6        | v4.0,v4.1,v4.2,v4.3,v4.4,v4.5 |
 | v2.14.5                                 | v2.14.3        | v4.0,v4.1,v4.2,v4.3,v4.4 |
 | v2.14.4                                 | v2.14.3        | v4.0,v4.1,v4.2,v4.3 |
 | v2.14.2                                 | v2.14.3        | v4.0,v4.1,v4.2,v4.3 |
 | v2.14.1                                 | v2.14.1        | v4.0,v4.1,v4.2 |
 | v2.14.0                                 | v2.14.1        | v4.0,v4.1,v4.2 |
+
+## v2.14.6
+
+### Features and Enhancements
+
+#### Upgrade Harbor to v2.14.6
+
+The bundled Harbor is upgraded to v2.14.6. After the operator is upgraded, instances running Harbor v2.14.x are upgraded to v2.14.6 automatically. Instances running Harbor v2.12.x must be upgraded manually: upgrade PostgreSQL to version 15 or 16 and back up the instance first, and expect the instance to be unavailable during the upgrade.
+
+#### Product Renamed to Alauda Toolchain Enterprise Registry E1
+
+The operator is renamed from Alauda Build of Harbor to Alauda Toolchain Enterprise Registry E1. The new name is shown in OperatorHub and in the console.
+
+#### Single High Availability Template
+
+The `High Availability (Envoy Gateway)` template is removed and merged into the `High Availability` template. To expose a new instance through Envoy Gateway, use the `High Availability` template and set `Network Access` to `Gateway API`. See [Expose Harbor with Envoy Gateway](../howto/11_expose_with_envoy_gateway.mdx).
+
+#### Migrate from Ingress to Gateway API
+
+A new guide describes how to switch an existing instance from Ingress to Gateway API, including verification and rollback. See [Migrate a Harbor Instance from Ingress to Gateway API](../howto/12_migrate_ingress_to_gateway.mdx).
+
+#### Fix Security Vulnerabilities
+
+With this release, several security vulnerabilities have been fixed.
+
+### Fixed Issues
+
+{/* release-notes-for-bugs?template=fixed&project=DEVOPS&version=v2.14.6 */}
+
+### Known Issues
+
+{/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.14.6 */}
 
 ## v2.14.5
 
@@ -93,9 +126,9 @@ With this release, several security vulnerabilities have been fixed.
 
 ### Features and Enhancements
 
-#### Alauda Build of Harbor
+#### Alauda Toolchain Enterprise Registry E1
 
-The Alauda Build of Harbor operator now integrates the community edition of Harbor version 2.14.
+The Alauda Toolchain Enterprise Registry E1 operator now integrates the community edition of Harbor version 2.14.
 By this update, this operator enables users to leverage the latest features and improvements from the Harbor community,
 supporting efficient software development workflows.
 
@@ -108,3 +141,9 @@ To know more about Harbor v2.14 features, please visit [Harbor v2.14 Release Not
 ### Known Issues
 
 {/* release-notes-for-bugs?template=unfixed&project=DEVOPS&version=v2.14.0 */}
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

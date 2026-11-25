@@ -86,3 +86,9 @@ If Step 2 showed the Pod being OOM-killed, raise the resource limits on the Harb
 
 - Even with all three mitigations, Webhook delivery is **best-effort**. Consumers must not assume every event will be delivered — the retry budget is finite (10 attempts) and events are dropped after that.
 - When designing integrations that rely on Harbor Webhooks, prefer idempotent consumers and periodically reconcile against the Harbor API rather than trusting a single notification.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

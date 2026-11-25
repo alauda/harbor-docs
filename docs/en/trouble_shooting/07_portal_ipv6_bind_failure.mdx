@@ -1,0 +1,107 @@
+# Portal Pod Fails to Start with `Address family not supported by protocol`
+
+## Problem Description
+
+The Harbor portal pod never becomes ready and restarts continuously (`CrashLoopBackOff`). Its log contains only two lines:
+
+```
+2026/09/02 03:56:25 [emerg] 1#0: socket() [::]:8080 failed (97: Address family not supported by protocol)
+nginx: [emerg] socket() [::]:8080 failed (97: Address family not supported by protocol)
+```
+
+Characteristics of this failure:
+
+- The other Harbor components (core, jobservice, registry) start normally.
+- The nginx component fails the same way when Harbor is exposed through anything other than Ingress or Route.
+- The cluster is IPv4 single-stack, and the Harbor instance is not configured for IPv6 in any way.
+
+## Root Cause
+
+The portal and nginx components are served by nginx. By default their generated `nginx.conf` binds both address families:
+
+```
+listen 8080;
+listen [::]:8080;
+```
+
+When the node kernel has IPv6 completely disabled, the `socket(AF_INET6, ...)` call for the second directive returns `EAFNOSUPPORT` (errno 97). nginx treats this as a fatal startup error and exits, so the pod never serves traffic.
+
+**An IPv4 single-stack Kubernetes cluster does not cause this by itself.** Binding `[::]` succeeds whenever the node kernel provides an IPv6 stack, even if no IPv6 address is assigned anywhere. The failure requires IPv6 to be switched off at the kernel level — typically the `ipv6.disable=1` boot parameter or a blacklisted `ipv6` module, which security hardening baselines often apply.
+
+The Harbor components written in Go (core, jobservice) and the registry bind their ports without pinning an address family, so their listeners fall back to IPv4 on such nodes. This is why only the nginx-based components fail.
+
+## Troubleshooting
+
+### Step 1 - Confirm the error in the pod log
+
+```bash
+kubectl -n <NAMESPACE> logs -l "release=<HARBOR_NAME>,component=portal" --tail=20
+```
+
+The `socket() [::]:<PORT> failed (97: ...)` message confirms that nginx failed while binding the IPv6 listener, not while starting the application.
+
+### Step 2 - Confirm IPv6 is disabled on the node
+
+Identify the node that runs the pod, then run the following commands on it:
+
+```bash
+# If this file does not exist, the kernel provides no IPv6 stack at all
+cat /proc/net/if_inet6
+
+# Look for ipv6.disable=1 in the kernel boot parameters
+grep -o 'ipv6[^ ]*' /proc/cmdline
+
+# "unknown key" here is another indication that IPv6 is unavailable
+sysctl net.ipv6.conf.all.disable_ipv6
+```
+
+If IPv6 is available on the node, this document does not apply and you should look for a different cause, such as a port conflict inside the pod.
+
+## Solution
+
+### Disable the IPv6 listeners in the Harbor instance (recommended)
+
+Set `ipFamily.ipv6.enabled` to `false` in the Harbor instance. The chart then renders the nginx configurations of the portal and nginx components without any `listen [::]` directive:
+
+```yaml
+spec:
+  helmValues:
+    ipFamily:
+      ipv4:
+        enabled: true
+      ipv6:
+        enabled: false
+```
+
+:::warning
+Write `false` as a boolean, not as the quoted string `"false"`. The `spec.helmValues` field preserves the original type, and a non-empty string is truthy in the chart's template conditions. A quoted value therefore keeps the IPv6 listener in place and reproduces exactly the same failure.
+:::
+
+The portal and nginx deployments carry a checksum annotation over their configuration, so updating the instance rolls the affected pods automatically. Verify the result once the update is reconciled:
+
+```bash
+# Resolve the name of the portal ConfigMap, which is derived from the instance name
+kubectl -n <NAMESPACE> get cm -l release=<HARBOR_NAME> -o name | grep portal
+
+kubectl -n <NAMESPACE> get cm <PORTAL_CONFIGMAP> -o jsonpath='{.data.nginx\.conf}' | grep listen
+```
+
+Only `listen 8080;` should remain. Keep `ipFamily.ipv4.enabled` set to `true`; disabling both families removes every `listen` directive and leaves nginx with nothing to serve.
+
+### Alternative - Restore IPv6 on the nodes
+
+If the hardening policy allows it, remove the `ipv6.disable=1` boot parameter (or un-blacklist the `ipv6` module) and reboot the affected nodes. The kernel then accepts `AF_INET6` sockets and the default configuration works unchanged. No IPv6 address or dual-stack cluster configuration is required — only the presence of the kernel stack.
+
+This option requires a node reboot, so the instance-level setting above is usually preferable for an existing environment.
+
+## Notes
+
+- **Affected components.** The portal is always affected. The nginx component is deployed, and therefore also affected, whenever `expose.type` is not `ingress` or `route`.
+- **Port numbers.** With `internalTLS` enabled the components listen on `8443` instead of `8080`. The error message and the fix are identical.
+- **Plan it before deployment.** Applying the same `ipFamily` setting in the initial Harbor instance definition avoids the failure entirely on nodes known to run without IPv6. See [Deploying from YAML](../install/03_harbor_deploy.mdx#deploying-from-yaml) for where the snippet belongs in a complete instance definition.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

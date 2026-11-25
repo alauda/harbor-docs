@@ -98,3 +98,9 @@ Refresh the Harbor web UI to confirm the 403 error is resolved.
 - For production environments, execute during a **low-traffic maintenance window** to minimize the impact of the write lock.
 - For the `project` table specifically, the data volume is typically very small (tens to hundreds of rows), so the lock duration is negligible.
 - If zero-downtime is required, PostgreSQL 12+ supports `REINDEX TABLE CONCURRENTLY project`, which builds the new index without holding an exclusive lock. However, this takes longer and requires more disk space.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

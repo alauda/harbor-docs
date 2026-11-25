@@ -81,3 +81,9 @@ Once HTTPS is properly configured on the Ingress, the LB's `404` on 443 is no lo
 
 - **Same root cause, different error.** Pipelines that pull manifests may report `invalid character '<' looking for beginning of value` instead of `unexpected end of JSON input`. Both originate from the same HTML/empty `404` response.
 - **Why not fix it in the runtime?** The "HTTPS first, no fall-back after successful handshake" behavior is the documented convention for most container runtimes and is not something Harbor or this operator can change.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

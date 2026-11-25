@@ -67,3 +67,9 @@ kubectl -n <NAMESPACE> scale deployment <RELEASE>-harbor-core --replicas=<ORIGIN
 
 - This class of issues is not specific to Harbor Core. Any Harbor component split across nodes with skewed clocks can exhibit similar token-validation failures.
 - Restarting Harbor Pods is **not** a workaround — the tokens will keep being rejected as long as the underlying clocks stay out of sync.
+
+---
+
+Harbor™ is a trademark of The Linux Foundation.
+
+Alauda is an independent vendor. This product is not affiliated with, endorsed by, or sponsored by The Linux Foundation. All trademarks are the property of their respective owners and are used here for identification purposes only.

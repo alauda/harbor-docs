@@ -1,0 +1,186 @@
+---
+title: "Migrate a Harbor Instance from Ingress to Gateway API"
+description: "How to switch an existing Harbor instance that is exposed through an Ingress to Gateway API (HTTPRoute), including preparation, the configuration change, verification, and rollback."
+weight: 140
+---
+
+# Migrate a Harbor Instance from Ingress to Gateway API
+
+## Overview
+
+Harbor instances deployed with `expose.type: ingress` rely on an `Ingress` resource and an Ingress controller. On clusters that only provide Gateway API (for example, no ALB or Ingress controller is installed), the `Ingress` is not served and the instance is no longer reachable from outside the cluster.
+
+This document describes how to switch an existing instance to `expose.type: route`, so that Harbor is exposed through an `HTTPRoute` attached to a `Gateway`. The switch only changes how traffic enters the cluster. The database, Redis, registry storage, projects, images, and users are not touched, provided they are stored on persistent storage (see the warning below).
+
+:::info
+
+New instances can be deployed directly with the `High Availability` template (set `Network Access` to `Gateway API`), see [Expose Harbor with Envoy Gateway](./11_expose_with_envoy_gateway.mdx). This document is only for instances that already exist.
+
+:::
+
+## What Changes
+
+| Item | Before (Ingress) | After (Gateway API) |
+| --- | --- | --- |
+| `spec.helmValues.expose.type` | `ingress` | `route` |
+| Entry resource | `Ingress` `<instance>-ingress` | `HTTPRoute` `<instance>-route` |
+| TLS termination | Ingress controller, certificate referenced by `expose.tls` | Gateway `HTTPS` listener, `expose.tls.enabled` stays `false` |
+| Ingress annotations (for example `proxy-body-size`, `ssl-redirect`) | `expose.ingress.annotations` | Not carried over. Configure the equivalent on the Gateway or with an Envoy Gateway policy |
+| Harbor Pods | Unchanged | `core`, `jobservice` and `registry` are restarted by the rolling update, `portal` is not |
+
+:::warning
+
+Plan a short maintenance window. The `core`, `registry` and `jobservice` Pods are restarted, and the entry point switches from the `Ingress` to the `HTTPRoute`. Requests can fail while the new Pods become ready. Running image pushes are interrupted.
+
+The `registry` Pod is recreated. If the instance does not use persistent storage for the registry (`persistence.enabled: false`, so the data lives in an `emptyDir`), the image data is lost, although the projects and artifact records in the database remain. Only migrate instances whose registry data is on a PersistentVolume or object storage.
+
+:::
+
+## Prerequisites
+
+1. The cluster provides the Gateway API CRDs and a Gateway controller, for example the Envoy Gateway Operator. See [Prerequisites](./11_expose_with_envoy_gateway.mdx#prerequisites).
+2. You have a `Gateway` that Harbor can attach to, see [Step 1: Create the Gateway](./11_expose_with_envoy_gateway.mdx#create-gateway). Keep it in the Harbor namespace unless you need a [cross-namespace Gateway](./11_expose_with_envoy_gateway.mdx#cross-namespace-gateway).
+3. If the instance serves HTTPS, the certificate `Secret` exists in the Gateway's namespace and is referenced by the Gateway `HTTPS` listener, see [TLS Configuration](./11_expose_with_envoy_gateway.mdx#tls-configuration).
+4. The domain name of the instance can be changed to resolve to the Gateway address (see [Step 5](#switch-dns)).
+5. The instance is backed up, see [Backup and Restore Using Velero](./04_backup_and_restore_using_velero.mdx).
+
+## Step 1: Record the Current Configuration \{#record-current-config}
+
+Save the current instance so that you can roll back:
+
+```shell
+kubectl get harbor <instance name> -n <harbor instance namespace> -o yaml > harbor-before-migration.yaml
+```
+
+Note the following values, because you reuse them in the next step:
+
+- `spec.helmValues.expose.ingress.hosts.core`: the domain name.
+- `spec.helmValues.externalURL`: the access address, its scheme must match the Gateway listener.
+- `spec.helmValues.expose.tls`: whether TLS was enabled on the Ingress.
+
+## Step 2: Change the Instance to `route` \{#change-to-route}
+
+Edit the instance:
+
+```shell
+kubectl edit harbor <instance name> -n <harbor instance namespace>
+```
+
+Replace the `expose` section. Before:
+
+```yaml
+spec:
+  helmValues:
+    externalURL: https://harbor.example.com
+    expose:
+      type: ingress
+      tls:
+        enabled: true
+        certSource: secret
+        secret:
+          secretName: harbor-tls
+      ingress:
+        hosts:
+          core: harbor.example.com
+        className: <ingress class>
+```
+
+After:
+
+```yaml
+spec:
+  helmValues:
+    externalURL: https://harbor.example.com
+    expose:
+      type: route
+      tls:
+        enabled: false
+      route:
+        parentRefs:
+          - name: harbor-gateway
+            namespace: <gateway namespace>
+            sectionName: https
+            group: gateway.networking.k8s.io
+            kind: Gateway
+        hosts:
+          - harbor.example.com
+```
+
+Notes:
+
+- Remove the `expose.ingress` section. With `expose.type: route` it is ignored, and keeping it only causes confusion.
+- Keep `externalURL` unchanged when the domain name and scheme do not change. If the scheme changes (for example `http` to `https`), update it and make sure `sectionName` points to the matching Gateway listener (`http` or `https`).
+- For a plain HTTP instance, use `tls.enabled: false` and `sectionName: http`, with an `HTTP` listener on the Gateway.
+- The example attaches to a Gateway in another namespace. The Gateway in [Step 1 of the Envoy Gateway guide](./11_expose_with_envoy_gateway.mdx#create-gateway) uses `allowedRoutes.namespaces.from: Same`, which rejects routes from other namespaces. For a cross-namespace Gateway, first let its listener accept routes from the Harbor namespace (`from: Selector` or `All`), as described in [Cross-namespace Gateway](./11_expose_with_envoy_gateway.mdx#cross-namespace-gateway). Otherwise keep the Gateway in the Harbor namespace and omit `namespace` from `parentRefs`.
+- Do not change other values (database, Redis, storage, replicas) in the same edit, so that a problem can be attributed to the exposure change.
+
+The operator applies the change as an upgrade of the same release. The `Deployed` condition of the instance reports `UpgradeSuccessful` when it finishes.
+
+## Step 3: Verify the Route \{#verify}
+
+1. The `Ingress` is removed and the `HTTPRoute` is created and accepted:
+
+   ```shell
+   kubectl get ingress -n <harbor instance namespace>
+   kubectl get httproute -n <harbor instance namespace>
+   kubectl get httproute <instance name>-route -n <harbor instance namespace> \
+     -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+   ```
+
+   Expected: no `Ingress` for the instance, and `Accepted=True` and `ResolvedRefs=True` for the route.
+
+2. All Harbor Pods are ready:
+
+   ```shell
+   kubectl get pods -n <harbor instance namespace>
+   ```
+
+3. Access the instance through the Gateway. If the domain does not resolve yet, map it to the Gateway address on the client, or send the `Host` header explicitly. Use the scheme and port of the Gateway listener that the route is attached to. The commands below assume an `HTTPS` listener on port `443`, and `-k` skips certificate verification for a self-signed certificate. For a Gateway exposed through a `NodePort` (see [Access without a LoadBalancer](./11_expose_with_envoy_gateway.mdx#access-without-loadbalancer)), use `https://<node IP>:<node port>` and keep the `Host` header. For an `HTTP` listener, use `http://` and drop `-k`:
+
+   ```shell
+   curl -ik -H 'Host: harbor.example.com' https://<gateway address>/v2/
+   curl -k -u admin:<password> -H 'Host: harbor.example.com' https://<gateway address>/api/v2.0/projects
+   ```
+
+   `/v2/` returns `401` with a `docker-distribution-api-version` header, and the project list returns the existing projects.
+
+4. Verify the registry with a Docker client:
+
+   ```shell
+   docker login harbor.example.com -u admin
+   docker pull harbor.example.com/<project>/<repository>:<tag>
+   docker push harbor.example.com/<project>/<repository>:<new tag>
+   ```
+
+## Step 4: Check Dependent Components \{#check-dependents}
+
+Anything that used the old `Ingress` annotations or address needs a check:
+
+- **Request size limits.** The `proxy-body-size` annotation of the Ingress no longer applies. Test pushing a large image layer. If uploads are rejected or time out, adjust the Gateway side with an Envoy Gateway `ClientTrafficPolicy` or `BackendTrafficPolicy`.
+- **Clients with a fixed address.** Replication endpoints, CI pipelines, and `imagePullSecrets` that use the domain name keep working when the domain does not change. Those that use the Ingress controller address must be updated.
+- **Other Harbor instances.** If other instances replicate from this one, trigger a replication rule and confirm it succeeds.
+
+## Step 5: Switch DNS \{#switch-dns}
+
+When the Gateway has a different external address from the Ingress controller, point the domain name at the Gateway address. To lower the risk, reduce the DNS TTL beforehand, and keep the old Ingress controller running until the new route is verified.
+
+## Roll Back \{#roll-back}
+
+If verification fails, restore the saved configuration:
+
+```shell
+kubectl apply -f harbor-before-migration.yaml
+```
+
+If the apply is rejected because of a `resourceVersion` conflict, remove the server-populated fields (`metadata.resourceVersion`, `uid`, `creationTimestamp`, `generation`, `managedFields` and `status`) from the file first. The operator re-creates the `Ingress` and deletes the `HTTPRoute`. Because `kubectl apply` merges with the live object, the `expose.route` section added during the migration can remain in the instance. It is ignored while `expose.type` is `ingress`, and you can delete it with `kubectl edit`. Then switch DNS back to the Ingress controller address if you changed it.
+
+## Troubleshooting
+
+| Symptom | Possible Cause | Resolution |
+| --- | --- | --- |
+| `HTTPRoute` is not accepted | Wrong `parentRefs`, or the listener does not allow the route's namespace | Check the Gateway name, namespace and `sectionName`, and its `allowedRoutes`, see [Cross-namespace Gateway](./11_expose_with_envoy_gateway.mdx#cross-namespace-gateway) |
+| `404` from the Gateway | The `hosts` value does not match the requested domain | Make `hosts` equal to the domain, or send the matching `Host` header |
+| Browser redirects or the Docker login fails | `externalURL` scheme or domain differs from what the Gateway serves | Keep `externalURL` consistent with the Gateway listener and domain |
+| TLS handshake failure | The certificate `Secret` is missing or not in the Gateway's namespace | See [TLS Configuration](./11_expose_with_envoy_gateway.mdx#tls-configuration) |
+| Large pushes fail with `413` or time out | The old Ingress body-size or timeout annotations were not carried over | Configure an Envoy Gateway traffic policy for the route, see [Step 4](#check-dependents) |
+| The old `Ingress` is still present | The instance was edited without removing `expose.type: ingress`, or the update has not finished | Check `spec.helmValues.expose.type` and the `Deployed` condition of the instance |
